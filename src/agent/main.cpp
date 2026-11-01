@@ -194,10 +194,13 @@ bool WaitForModule(const ExplorerProcess& explorer, const wchar_t* name, HANDLE 
 // couldn't be loaded, or the loaded file isn't the one discovery analysed.
 bool LoadSwitcher(ExplorerProcess& explorer, const std::wstring& path, const AltTab::ImageIdentity& analysed) {
     if (!explorer.HasModule(AltTab::kSwitcherDll)) {
-        std::optional<bool> loaded = explorer.Load(path);
-        if (!loaded || !*loaded) {
-            Log(L"Explorer %lu: loading %s failed%s", explorer.Pid(), path.c_str(),
-                loaded ? L"" : L" (no answer in time)");
+        if (!explorer.Load(path).has_value()) {
+            Log(L"Explorer %lu: loading %s didn't finish in time", explorer.Pid(), path.c_str());
+            return false;
+        }
+        // Checked by name, not by the path Load used: Windows may spell the loaded path differently.
+        if (!explorer.HasModule(AltTab::kSwitcherDll)) {
+            Log(L"Explorer %lu: loading %s failed", explorer.Pid(), path.c_str());
             return false;
         }
         Log(L"Explorer %lu: loaded %s ahead of the first Alt+Tab", explorer.Pid(), AltTab::kSwitcherDll);
@@ -209,6 +212,47 @@ bool LoadSwitcher(ExplorerProcess& explorer, const std::wstring& path, const Alt
     return true;
 }
 
+// The switcher DLL this Explorer loaded or will load: the loaded file, else the
+// file Windows registered it as. If it isn't registered, or that file can't be
+// read, waits for the first Alt+Tab to load it. Returns nothing, with `wake`
+// set, when a wait was interrupted.
+std::wstring FindSwitcherPath(ExplorerProcess& explorer, HANDLE stop, WakeReason& wake) {
+    std::wstring path = explorer.ModulePath(AltTab::kSwitcherDll);
+    if (!path.empty()) return path;
+    path = RegisteredComponentPath(AltTab::kSwitcherDll);
+    if (!path.empty() && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return path;
+    Log(L"Explorer %lu: %s %s; waiting for the first Alt+Tab to load it", explorer.Pid(), AltTab::kSwitcherDll,
+        path.empty() ? L"isn't registered" : L"is registered as a file that doesn't exist");
+    if (!WaitForModule(explorer, AltTab::kSwitcherDll, stop, wake)) return L"";
+    path = explorer.ModulePath(AltTab::kSwitcherDll);
+    if (path.empty()) {  // loaded, but unreadable: Explorer is exiting
+        Log(L"Explorer %lu: its Alt+Tab DLLs couldn't be read; it's probably exiting", explorer.Pid());
+        wake = WaitFor(stop, explorer.Handle(), INFINITE);
+    }
+    return path;
+}
+
+// Works out what the hooks need, loads the switcher DLL if Explorer hasn't,
+// and starts the hooks. `injected` is set once the agent loads anything into
+// Explorer. Returns the Start result, or nothing if the hooks weren't started
+// or `wake` says a wait was interrupted.
+std::optional<DWORD> StartHooks(ExplorerProcess& explorer, const std::wstring& switcher, const std::wstring& dll,
+                                HANDLE stop, const std::wstring& directory, WakeReason& wake, bool& injected) {
+    bool explorerHadSwitcher = explorer.HasModule(AltTab::kSwitcherDll);
+    std::optional<AltTab::Internals> found = Discover(explorer, switcher, stop, directory, wake);
+    if (!found) return std::nullopt;
+    // An Alt+Tab during discovery loaded the switcher: let that opening finish first.
+    if (!explorerHadSwitcher && explorer.HasModule(AltTab::kSwitcherDll)) {
+        wake = WaitFor(stop, explorer.Handle(), kSettleMs);
+        if (wake != WakeReason::Timeout) return std::nullopt;
+    }
+    injected = true;
+    if (!LoadSwitcher(explorer, switcher, found->switcher.module)) return std::nullopt;
+    std::optional<DWORD> result = explorer.LoadAndStart(dll, *found);
+    Log(L"Explorer %lu: %s", explorer.Pid(), Describe(result));
+    return result;
+}
+
 // Serves one Explorer process until it exits or the agent is asked to stop.
 // Returns false when the agent should exit.
 bool ServeExplorer(ExplorerProcess& explorer, HANDLE stop, const std::wstring& directory, CrashGuard& guard) {
@@ -218,34 +262,23 @@ bool ServeExplorer(ExplorerProcess& explorer, HANDLE stop, const std::wstring& d
     // Alt+Tab. The agent loads the switcher itself, from where Windows registered
     // it, so the first opening already builds the kept menu.
     if (!WaitForModule(explorer, AltTab::kTwinuiDll, stop, wake)) return wake == WakeReason::ExplorerExited;
-    std::wstring switcher = explorer.ModulePath(AltTab::kSwitcherDll);
-    if (switcher.empty()) switcher = RegisteredComponentPath(AltTab::kSwitcherDll);
-    if (switcher.empty()) {
-        Log(L"Explorer %lu: %s isn't registered; waiting for the first Alt+Tab to load it", explorer.Pid(),
-            AltTab::kSwitcherDll);
-        if (!WaitForModule(explorer, AltTab::kSwitcherDll, stop, wake)) return wake == WakeReason::ExplorerExited;
-        switcher = explorer.ModulePath(AltTab::kSwitcherDll);
-    }
+    std::wstring switcher = FindSwitcherPath(explorer, stop, wake);
+    if (switcher.empty()) return wake == WakeReason::ExplorerExited;
     if (explorer.HasModule(AltTab::kSwitcherDll)) {  // loaded by an opening that may still be in progress
         wake = WaitFor(stop, explorer.Handle(), kSettleMs);
         if (wake != WakeReason::Timeout) return wake == WakeReason::ExplorerExited;
     }
 
-    bool hooked;                  // our copy is active in this Explorer
-    bool loadedSwitcher = false;  // the agent loaded the switcher DLL into it
+    bool hooked;            // our copy is active in this Explorer
+    bool injected = false;  // the agent loaded something into it: a crash from then on counts
     if (explorer.IsHooked()) {
-        hooked = explorer.HasLoaded(dll);  // left running by an agent that was killed
+        hooked = injected = explorer.HasLoaded(dll);  // left running by an agent that was killed
         Log(L"Explorer %lu: %s", explorer.Pid(), hooked ? L"hooks already active" : L"another copy is already active");
     } else {
-        std::optional<AltTab::Internals> found = Discover(explorer, switcher, stop, directory, wake);
+        std::optional<DWORD> result = StartHooks(explorer, switcher, dll, stop, directory, wake, injected);
         if (wake != WakeReason::Timeout) return wake == WakeReason::ExplorerExited;
-        bool explorerHadSwitcher = explorer.HasModule(AltTab::kSwitcherDll);
-        if (found && !LoadSwitcher(explorer, switcher, found->switcher.module)) found.reset();
-        loadedSwitcher = !explorerHadSwitcher && explorer.HasModule(AltTab::kSwitcherDll);
-        std::optional<DWORD> result = found ? explorer.LoadAndStart(dll, *found) : std::nullopt;
         hooked = result == Ipc::kStarted;
         if (hooked) DeleteFileW((directory + Ipc::kProblemFile).c_str());
-        if (found) Log(L"Explorer %lu: %s", explorer.Pid(), Describe(result));
     }
 
     HANDLE turnedOff =
@@ -266,9 +299,7 @@ bool ServeExplorer(ExplorerProcess& explorer, HANDLE stop, const std::wstring& d
     }
     DWORD exitCode = explorer.ExitCode();
     Log(L"Explorer %lu exited (0x%08lx)", explorer.Pid(), exitCode);
-    // A crash counts if anything of ours was in this Explorer, including only the switcher DLL loaded early.
-    if ((hooked || loadedSwitcher) && CrashGuard::IsCrash(exitCode) && !GetSystemMetrics(SM_SHUTTINGDOWN) &&
-        guard.RecordCrash()) {
+    if (injected && CrashGuard::IsCrash(exitCode) && !GetSystemMetrics(SM_SHUTTINGDOWN) && guard.RecordCrash()) {
         Log(L"Explorer crashed twice within an hour with Instant Alt+Tab active in it; disabled until the next "
             L"install");
         return false;

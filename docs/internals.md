@@ -55,7 +55,8 @@ Windows' own, and Explorer would have loaded it at the first Alt+Tab anyway.
     next Windows update changes the DLLs.
   - **turned off**: the hooks saw something unexpected in Explorer and stopped; until Explorer
     restarts.
-  - **disabled**: Explorer crashed twice within an hour while hooked; until the next install.
+  - **disabled**: Explorer crashed twice within an hour after the agent loaded anything into it;
+    until the next install.
 - **Discovery**: working out, from the DLL files on the user's PC, every function and offset the
   hooks need. What it finds are the **internals** (`AltTabInternals.h`).
 - **PE file**: the file format of Windows executables and DLLs. An **RVA** (relative virtual
@@ -177,8 +178,9 @@ menu's cards are answered directly.
   for the count to reach zero, and only then frees the trampolines. If something is still running
   after the timeout, the DLL pins itself in memory, so the agent's `FreeLibrary` can't unload code
   that is in use.
-- **Crash guard.** If Explorer exits with an error status twice within an hour while the hooks are
-  active, the agent stops loading them until the next install. Normal restarts and sign-out don't
+- **Crash guard.** If Explorer exits with an error status twice within an hour after the agent loaded
+  anything into it (the switcher DLL or the hooks), the agent stops loading anything until the next
+  install. Normal restarts and sign-out don't
   count.
 
 ## Finding the internals

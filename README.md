@@ -41,7 +41,8 @@ functions:
 The menu that is kept has to be built once, so the first Alt+Tab after installing, and the first
 after Explorer starts (at sign-in, or after a restart), open at the usual speed. Windows loads part
 of its Alt+Tab code only on the first press; the agent loads it as soon as Explorer starts, so the
-hooks are ready for that first press.
+hooks are ready for that first press. (Right after a Windows update the agent first downloads the
+new build's symbols, so that can take a little longer.)
 [docs/internals.md](docs/internals.md) explains each hook and how the internals are found.
 
 ## Install
@@ -101,8 +102,8 @@ discovery finds everything in three consecutive monthly builds of the two DLLs.
 - **It turns itself off when in doubt.** If Windows does anything unexpected (a failed call, a card
   list that isn't the one the menu shows, an exception), it drops the kept menu, Alt+Tab stays
   stock until Explorer restarts, and a message tells you. `status` shows it too.
-- **It stops for good after repeated crashes.** If Explorer crashes twice within an hour while the
-  hooks are active, the agent stops loading them until you install again.
+- **It stops for good after repeated crashes.** If Explorer crashes twice within an hour after the
+  agent loaded anything into it, the agent stops loading anything until you install again.
 - **`stop` and `uninstall` remove every hook from the running Explorer.** If a hooked call is still
   running, the DLL stays loaded but inactive until Explorer restarts.
 

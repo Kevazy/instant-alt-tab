@@ -1,7 +1,7 @@
 #pragma once
 
-// Turns Instant Alt+Tab off if Explorer keeps crashing while the hooks are
-// active: two crashes within an hour disable it until the next install. Only
+// Turns Instant Alt+Tab off if Explorer keeps crashing after the agent loaded
+// anything into it: two crashes within an hour disable it until the next install. Only
 // crashes count (Explorer ending with an error status), not restarts or
 // sign-out. The record is a small text file, so it survives agent restarts.
 
