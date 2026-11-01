@@ -8,6 +8,7 @@
 
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <span>
 #include <string>
 #include <vector>
@@ -39,6 +40,8 @@ public:
     std::vector<uint32_t> Find(std::span<const uint8_t> bytes) const;
     // Whether a non-code section holds an absolute pointer to `rva` (a vtable entry, typically).
     bool IsReferencedFromData(uint32_t rva) const;
+    // Every code address stored as an absolute pointer in a non-code section (vtables, function tables).
+    std::set<uint32_t> CodePointersInData() const;
 
     struct DebugInfo {
         std::wstring pdbName;

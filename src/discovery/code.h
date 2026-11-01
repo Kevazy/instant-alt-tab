@@ -17,6 +17,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <set>
 #include <vector>
 
 namespace discovery {
@@ -119,6 +120,7 @@ public:
     std::vector<CallSite> CallsTo(uint32_t target) const;
     std::vector<CallSite> CallsFrom(uint32_t function) const;
     std::vector<uint32_t> FunctionsReferencing(uint32_t rva) const;
+    std::set<uint32_t> CallTargets() const;
 
 private:
     std::vector<CallSite> calls_;

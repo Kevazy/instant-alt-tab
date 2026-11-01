@@ -19,6 +19,7 @@ const std::wstring kCreateControl = L"XamlAltTabViewHost::CreateAltTabControl";
 const std::wstring kShow = L"XamlAltTabViewHost::Show";
 const std::wstring kDismiss = L"XamlAltTabViewHost::v_DismissView";
 const std::wstring kDisplay = L"XamlAltTabViewHost::DisplayAltTab";
+const std::wstring kGetItemForView = L"CachedDataSource::GetItemForView";
 const std::wstring kRegisterRoot = kSwitcherApi + L"__IHostInformationRegistrarPublicNonVirtuals::RegisterXamlRoot";
 // twinui's calls into the AltTab control's interface.
 const std::wstring kNavigateToItem = kSwitcherApi + L"__IAltTabPublicNonVirtuals::NavigateToItem";
@@ -33,16 +34,19 @@ const std::wstring kContentGetter =
     L"winrt::impl::produce<" + kHostWindowClass + L"," + kHostWindowInterface + L">::get_XamlContent";
 const std::wstring kContentSetter =
     L"winrt::impl::produce<" + kHostWindowClass + L"," + kHostWindowInterface + L">::put_XamlContent";
+// The interface the host's data source member must have.
+const std::wstring kDataSourceId = L"_uuidof_?AUISwitchItemDataSourceMultitaskingComposableShellInternalWindows";
 const std::wstring kSwitchItemId =
     L"winrt::impl::guid_v<winrt::Windows::Internal::ComposableShell::Multitasking::ISwitchItem>";
 
 class Names {
 public:
-    Names(const PeFile& file, const std::wstring& cacheDirectory) {
-        std::vector<std::wstring> names{kCreateControl,   kShow,           kDismiss,       kDisplay,
-                                        kRegisterRoot,    kNavigateToItem, kNavigate,      kDataSourceToCx,
-                                        kContentProperty, kContentGetter,  kContentSetter, kSwitchItemId};
-        Symbols symbols = LookUpSymbols(file, names, cacheDirectory);
+    Names(const PeFile& file, const std::wstring& cacheDirectory, HANDLE cancel) {
+        std::vector<std::wstring> names{
+            kCreateControl,  kShow,           kDismiss,      kDisplay,        kRegisterRoot,
+            kGetItemForView, kNavigateToItem, kNavigate,     kDataSourceToCx, kContentProperty,
+            kContentGetter,  kContentSetter,  kSwitchItemId, kDataSourceId};
+        Symbols symbols = LookUpSymbols(file, names, cacheDirectory, cancel);
         if (!symbols.error.empty()) throw RuleFailed{symbols.error, symbols.retryLater};
         rvas_ = std::move(symbols.rvas);
     }
@@ -77,6 +81,14 @@ uint32_t MemberOffset(const wchar_t* what, const std::set<Value>& arguments, int
     return Unique(what, offsets);
 }
 
+GUID InterfaceId(const PeFile& file, uint32_t rva, const wchar_t* what) {
+    auto bytes = file.Read(rva, sizeof(GUID));
+    if (bytes.empty()) throw RuleFailed{std::wstring(what) + L"'s interface ID isn't in the file"};
+    GUID id;
+    std::memcpy(&id, bytes.data(), sizeof(GUID));
+    return id;
+}
+
 uint32_t SlotCalledBy(const PeFile& file, uint32_t wrapper, int depth, const wchar_t* what) {
     auto slot = VtableSlotCalled(WalkFunction(file, wrapper), depth);
     if (!slot) throw RuleFailed{std::wstring(what) + L": no single vtable call"};
@@ -85,8 +97,8 @@ uint32_t SlotCalledBy(const PeFile& file, uint32_t wrapper, int depth, const wch
 
 }  // namespace
 
-void FindTwinui(const PeFile& file, const std::wstring& cacheDirectory, internals::Twinui& twinui) {
-    Names names(file, cacheDirectory);
+void FindTwinui(const PeFile& file, const std::wstring& cacheDirectory, HANDLE cancel, internals::Twinui& twinui) {
+    Names names(file, cacheDirectory, cancel);
     twinui.createControl = FunctionAt(file, names.One(kCreateControl), L"CreateAltTabControl");
     twinui.show = FunctionAt(file, names.One(kShow), L"Show");
     twinui.dismiss = FunctionAt(file, names.One(kDismiss), L"v_DismissView");
@@ -128,9 +140,13 @@ void FindTwinui(const PeFile& file, const std::wstring& cacheDirectory, internal
     std::vector<Step> factory = WalkFunction(file, twinui.createControl.rva);
     twinui.hostDataSource = MemberOffset(L"data source member", FirstArguments(factory, names.One(kDataSourceToCx)), 0);
 
-    auto id = file.Read(names.One(kSwitchItemId), sizeof(GUID));
-    if (id.empty()) throw RuleFailed{L"ISwitchItem's interface ID isn't in the file"};
-    std::memcpy(&twinui.switchItem, id.data(), sizeof(GUID));
+    twinui.switchItem = InterfaceId(file, names.One(kSwitchItemId), L"ISwitchItem");
+    twinui.switchItemDataSource = InterfaceId(file, names.One(kDataSourceId), L"ISwitchItemDataSource");
+
+    // Show asks for the foreground window's item after storing the control and
+    // before positioning the selection; the hooks check the control there.
+    twinui.getItemForView = FunctionAt(file, names.One(kGetItemForView), L"GetItemForView");
+    if (FirstArguments(show, twinui.getItemForView.rva).empty()) throw RuleFailed{L"Show doesn't call GetItemForView"};
 }
 
 }  // namespace discovery

@@ -8,6 +8,8 @@
 
 #include "../shared/internals.h"
 
+#include <windows.h>
+
 #include <optional>
 #include <string>
 
@@ -20,6 +22,8 @@ struct Result {
 };
 
 // `cacheDirectory` (with a trailing backslash) keeps the looked-up symbol names.
-Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath, const std::wstring& cacheDirectory);
+// `cancel`, if set, stops a symbol download in progress.
+Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath, const std::wstring& cacheDirectory,
+                HANDLE cancel = nullptr);
 
 }  // namespace discovery

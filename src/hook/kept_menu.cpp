@@ -36,6 +36,7 @@ using HostFn = void(__fastcall*)(void* host);
 using SetHostContentFn = void(__fastcall*)(IUnknown** window, IUnknown** content);
 using RegisterRootFn = IUnknown*(__fastcall*)(IUnknown* registrar, IUnknown* root);
 using CloseListFn = void(__fastcall*)(void* list);
+using GetItemForViewFn = void*(__fastcall*)(void* source, void* view, void*, void*);
 using FindDescendantFn = IInspectable*(__fastcall*)(IInspectable* root);
 using GetContentFn = HRESULT(__stdcall*)(IUnknown* window, IUnknown** content);
 using NavigateToItemFn = HRESULT(__fastcall*)(IUnknown* control, IUnknown* item);
@@ -48,6 +49,7 @@ HostFn g_dismiss, g_display;
 SetHostContentFn g_setHostContent;
 RegisterRootFn g_registerRoot;
 CloseListFn g_closeList;
+GetItemForViewFn g_getItemForView;
 FindDescendantFn g_findDescendant;
 NavigateToItemFn g_navigateToItem;
 NavigateFn g_navigate;
@@ -87,6 +89,7 @@ struct KeptMenu {
     bool hidden = false;
     bool movedDisplay = false;  // the last opening showed up on another monitor than the context says
     bool closeSkipped = false;  // a card was chosen and the list was kept subscribed
+    bool missedWindow = false;  // Show navigated to a window none of its cards holds
 
     // Found in the visual tree at the first dismissal after it was displayed.
     bool inspected = false;
@@ -109,8 +112,9 @@ struct Opening {
     int flags;
     bool reused = false;
     bool displayDeferred = false;
-    bool cancelled = false;     // dismissed before Show returned
-    IUnknown* built = nullptr;  // the control CreateAltTabControl built in this opening
+    bool cancelled = false;   // dismissed before Show returned
+    com_ptr<IUnknown> built;  // the control CreateAltTabControl built in this opening
+    bool confirmed = false;   // ConfirmBuiltControl ran for it
     FirstNavigation firstNavigation = FirstNavigation::None;
 };
 
@@ -120,6 +124,7 @@ void* g_dismissingHost = nullptr;
 void* g_displayedHost = nullptr;             // displayed by ShowHook; another DisplayAltTab for it is a no-op
 size_t g_cardItemOffset = 0;                 // where a card keeps its ISwitchItem; learned from Show's NavigateToItem
 std::array<void*, 2> g_navigationTargets{};  // the control's NavigateToItem and Navigate, once hooked
+bool g_closeListSeen = false;                // Windows was seen calling closeList with a card list
 thread_local bool t_selectingFirstCard = false;
 std::vector<com_ptr<IUnknown>> g_listsToClose;
 
@@ -172,12 +177,15 @@ IUnknown* ComMember(void* host, size_t offset) {
 
 bool ListClosed(IUnknown* list) { return *(reinterpret_cast<BYTE*>(list) + g_listClosed) != 0; }
 
+void TurnOff(const wchar_t* reason);
+
 // Whether the host window currently shows `control`, through its own content getter.
 bool HostWindowShows(IUnknown* window, IUnknown* control) {
     if (!window || !control) return false;
     auto getter = VtableSlot(window, g_found.hostContentGetterSlot);
     auto setter = VtableSlot(window, g_found.hostContentSetterSlot);
     if (getter != g_twinui.base + g_found.hostContentGetter || setter != g_twinui.base + g_found.hostContentSetter) {
+        if (!g_failed) TurnOff(L"the host window's content accessors aren't where discovery found them");
         return false;
     }
     com_ptr<IUnknown> content;
@@ -247,17 +255,17 @@ std::wstring ContextChanges(const DisplayContext& a, const DisplayContext& b) {
 com_ptr<IUnknown> SwitchItemOf(IInspectable* card) {
     com_ptr<IUnknown> item;
     auto field = g_cardItemOffset ? static_cast<IUnknown*>(ReadPointer(card, g_cardItemOffset)) : nullptr;
-    if (field) field->QueryInterface(g_found.switchItem, item.put_void());
+    if (LooksLikeComObject(field)) field->QueryInterface(g_found.switchItem, item.put_void());
     return item;
 }
 
-// Whether exactly one card holds `item` where cards keep their item.
-bool OneCardHolds(IUnknown* item) {
+// How many cards hold `item` where cards keep their item.
+size_t CardsHolding(IUnknown* item) {
     size_t holders = 0;
     for (IInspectable* card : card_list::Cards(g_kept->cards.get())) {
         holders += ReadPointer(card, g_cardItemOffset) == item;
     }
-    return holders == 1;
+    return holders;
 }
 
 // Learns where a card keeps its item from the item Show selects: exactly one
@@ -328,6 +336,11 @@ void CloseQueuedLists() {
     g_listsToClose.clear();
     for (auto& list : lists) {
         if (ListClosed(list.get())) continue;
+        // Called directly only once Windows itself was seen calling it with a card list.
+        if (!g_closeListSeen) {
+            Log(L"left a dropped card list open: its close function hasn't been seen in use yet");
+            continue;
+        }
         try {
             g_closeList(list.get());
         } catch (...) {
@@ -432,6 +445,7 @@ std::optional<std::wstring> ReuseBlocker(void* host, void* display) {
     if (!kept.hidden || !kept.hostWindow) return L"previous menu not kept";
     if (!kept.verified) return L"card list not verified";
     if (!g_cardItemOffset) return L"card layout not learned yet";
+    if (kept.missedWindow) return L"card list missed a window";
     if (card_list::CardVectorOf(kept.list.get()) != kept.cards.get()) return L"card list replaced";
     if (!SameObject(ComMember(host, g_found.hostDataSource), kept.dataSource.get())) return L"data source changed";
     if (!SameObject(ComMember(host, g_found.hostWindow), kept.hostWindow.get()) ||
@@ -450,14 +464,16 @@ std::optional<std::wstring> ReuseBlocker(void* host, void* display) {
 HRESULT __fastcall NavigateToItemHook(IUnknown* control, IUnknown* item);
 HRESULT __fastcall NavigateHook(IUnknown* control, bool backward);
 
-// The control's NavigateToItem and Navigate are found in its own vtable, so
-// they're hooked when the first control is built. Later controls must have
-// the same ones.
+// The control's NavigateToItem and Navigate are read from its own vtable, at
+// the slots twinui calls them through. That is only right for the interface
+// pointer twinui calls them on, so they're hooked once the host is seen
+// holding exactly the pointer the factory returned, in the first opening that
+// builds a menu. Later controls must have the same ones.
 bool HookNavigation(IUnknown* control) {
     std::array<void*, 2> targets{VtableSlot(control, g_found.navigateToItemSlot),
                                  VtableSlot(control, g_found.navigateSlot)};
     if (g_navigationTargets[0]) return targets == g_navigationTargets;
-    if (!IsCode(g_switcher, targets[0]) || !IsCode(g_switcher, targets[1])) return false;
+    if (!IsCode(g_switcher, targets[0]) || !IsCode(g_switcher, targets[1]) || targets[0] == targets[1]) return false;
     // A Stop on another thread disables all hooks; none may be enabled after it.
     AcquireSRWLockExclusive(&g_uiThreadLock);
     bool hooked = !g_stopping && HookNow(targets[0], &NavigateToItemHook, &g_navigateToItem);
@@ -467,6 +483,18 @@ bool HookNavigation(IUnknown* control) {
     return hooked;
 }
 
+// Hooks the navigation once the host holds the built control itself (not
+// another interface of it), or refuses the build.
+void ConfirmBuiltControl(Opening& opening) {
+    if (opening.confirmed || !opening.built || opening.cancelled || !g_kept || g_kept->control != opening.built) return;
+    opening.confirmed = true;
+    if (ReadPointer(opening.host, g_found.hostControl) != opening.built.get()) {
+        TurnOff(L"the host doesn't hold its control where discovery found it");
+    } else if (!HookNavigation(opening.built.get())) {
+        TurnOff(L"the control's navigation isn't the one hooked before");
+    }
+}
+
 void Keep(IUnknown* control, void* host, void* list, void* display) {
     void* cards = card_list::CardVectorOf(list);
     IUnknown* dataSource = ComMember(host, g_found.hostDataSource);
@@ -474,9 +502,10 @@ void Keep(IUnknown* control, void* host, void* list, void* display) {
         Log(L"menu not kept: its card list or data source isn't the expected one");
         return;
     }
-    if (!HookNavigation(control)) {
-        if (!g_navigationTargets[0]) TurnOff(L"hooking the control's navigation failed");
-        Log(L"menu not kept: its control isn't the expected one");
+    com_ptr<IUnknown> typed;
+    dataSource->QueryInterface(g_found.switchItemDataSource, typed.put_void());
+    if (!typed) {
+        TurnOff(L"the host's data source member isn't a data source");
         return;
     }
     KeptMenu& kept = g_kept.emplace();
@@ -596,11 +625,8 @@ HRESULT __fastcall ShowHook(void* host, void* display, int flags, void* view) {
         TurnOff(L"Show failed");
         return hr;
     }
-    // The control the factory built must be where the host keeps it.
-    if (opening.built && !opening.cancelled && !SameObject(ComMember(host, g_found.hostControl), opening.built)) {
-        TurnOff(L"the host doesn't hold its control where discovery found it");
-        return hr;
-    }
+    // Normally confirmed in GetItemForViewHook already; this covers a Show that doesn't call it.
+    ConfirmBuiltControl(opening);
     // Show moved forward from the kept selection: start where a new menu starts instead.
     if (opening.reused && !opening.cancelled && opening.firstNavigation == FirstNavigation::Forward) {
         SelectFirstCard(ComMember(host, g_found.hostControl));
@@ -639,7 +665,7 @@ IUnknown* __fastcall CreateControlHook(void* host) {
     DropKeptMenu();
     unsigned sorts = card_list::SortCount();
     IUnknown* control = g_createControl(host);
-    opening->built = control;
+    opening->built.copy_from(control);
     // Building the control creates its card list and sorts it once.
     if (control && card_list::SortCount() != sorts) Keep(control, host, card_list::LastSortedList(), opening->display);
     Log(L"menu built (%s)", blocker->c_str());
@@ -669,7 +695,7 @@ void __fastcall SetHostContentHook(IUnknown** window, IUnknown** content) {
     // A newly built menu must go into the host window member discovery found.
     Opening* opening = g_opening;
     if (g_enabled && opening && opening->built && *content && GetCurrentThreadId() == g_uiThread &&
-        window != &Member(opening->host, g_found.hostWindow) && SameObject(*content, opening->built)) {
+        window != &Member(opening->host, g_found.hostWindow) && SameObject(*content, opening->built.get())) {
         TurnOff(L"the host doesn't hold its window where discovery found it");
     }
     if (g_enabled && g_kept && GetCurrentThreadId() == g_uiThread) {
@@ -726,11 +752,21 @@ IUnknown* __fastcall RegisterRootHook(IUnknown* registrar, IUnknown* root) {
     return registration;
 }
 
+// Show calls this after storing the control it built and before positioning
+// the selection: the moment to confirm the control and hook its navigation.
+void* __fastcall GetItemForViewHook(void* source, void* view, void* a, void* b) {
+    HookScope scope;
+    Opening* opening = g_opening;
+    if (g_enabled && opening && GetCurrentThreadId() == g_uiThread) ConfirmBuiltControl(*opening);
+    return g_getItemForView(source, view, a, b);
+}
+
 // The switcher closes a list when a card is chosen: it stops listening to the
 // data source because the menu is about to be thrown away. The kept menu's list
 // must keep listening, or it misses every window change from then on.
 void __fastcall CloseListHook(void* list) {
     HookScope scope;
+    if (card_list::CardVectorOf(list)) g_closeListSeen = true;
     if (g_enabled && g_kept && g_kept->list.get() == list && GetCurrentThreadId() == g_uiThread) {
         g_kept->closeSkipped = true;
         return;
@@ -756,11 +792,14 @@ bool IsKeptControl(IUnknown* control) {
 HRESULT __fastcall NavigateToItemHook(IUnknown* control, IUnknown* item) {
     HookScope scope;
     Opening* opening = g_opening;
-    if (opening && item && !t_selectingFirstCard && IsKeptControl(control)) {
+    if (opening && LooksLikeComObject(item) && !t_selectingFirstCard && IsKeptControl(control)) {
         if (!g_cardItemOffset) {
             LearnCardItemOffset(item);
-        } else if (!OneCardHolds(item)) {
+        } else if (size_t holders = CardsHolding(item); holders > 1) {
             TurnOff(L"cards no longer hold their item where they did");
+        } else if (holders == 0) {
+            g_kept->missedWindow = true;  // a window too new for the kept list: rebuild next time
+            Log(L"the kept card list doesn't have the foreground window yet");
         }
         if (opening->firstNavigation == FirstNavigation::None) opening->firstNavigation = FirstNavigation::ToItem;
     }
@@ -810,17 +849,17 @@ bool Install(const ModuleImage& twinui, const ModuleImage& switcher, const inter
     g_listClosed = found.switcher.listClosed;
     // The one real RegisterXamlRoot call: a direct call to it right before that return address.
     const BYTE* call = twinui.base + g_found.registerRootReturnInShow - 5;
+    if (!IsCode(twinui, call) || !IsCode(twinui, call + 4) || call[0] != 0xE8) return false;
     int32_t displacement;
     std::memcpy(&displacement, call + 1, sizeof(displacement));
-    if (!IsCode(twinui, call) || call[0] != 0xE8 || call + 5 + displacement != twinui.base + g_found.registerRoot.rva) {
-        return false;
-    }
+    if (call + 5 + displacement != twinui.base + g_found.registerRoot.rva) return false;
     bool hooked = CreateHook(twinui, g_found.show, &ShowHook, &g_show) &&
                   CreateHook(twinui, g_found.createControl, &CreateControlHook, &g_createControl) &&
                   CreateHook(twinui, g_found.dismiss, &DismissHook, &g_dismiss) &&
                   CreateHook(twinui, g_found.display, &DisplayHook, &g_display) &&
                   CreateHook(twinui, g_found.setHostContent, &SetHostContentHook, &g_setHostContent) &&
                   CreateHook(twinui, g_found.registerRoot, &RegisterRootHook, &g_registerRoot) &&
+                  CreateHook(twinui, g_found.getItemForView, &GetItemForViewHook, &g_getItemForView) &&
                   CreateHook(switcher, found.switcher.closeList, &CloseListHook, &g_closeList) &&
                   CreateHook(switcher, found.switcher.findDescendant, &FindDescendantHook, &g_findDescendant);
     if (hooked && !g_stoppedEvent) g_stoppedEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);

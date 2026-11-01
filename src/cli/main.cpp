@@ -53,7 +53,7 @@ bool PrintStatus() {
         Print(L"Turned off after Explorer crashed twice within an hour; install again to turn it back on.");
     }
     if (std::wstring problem = ReadTextFile(ActiveDirectory() + protocol::kProblemFile); !problem.empty()) {
-        Print(L"Not active for this version of Windows: %s", problem.c_str());
+        Print(L"Why it's stock:     %s", problem.c_str());
     }
     return true;
 }

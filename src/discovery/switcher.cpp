@@ -121,15 +121,21 @@ uint32_t FindStorage(const PeFile& file, uint32_t removeAt) {
 // When a card is chosen, the list marks itself closed and unsubscribes from
 // the window list: mov byte [list + X], 1, then a jump to a function that
 // first checks its subscription token (cmp qword [list + Y], 0). Such a tiny
-// function has no function table entry, so every code address after int3
-// padding is a candidate.
-std::pair<uint32_t, uint32_t> FindCloseList(const PeFile& file) {
-    std::set<std::pair<uint32_t, uint32_t>> found;
+// function may have no function table entry, so the candidates are every
+// function start, call target and code pointer in data, and every code
+// address after int3 padding.
+std::pair<uint32_t, uint32_t> FindCloseList(const PeFile& file, const CodeIndex& code) {
+    std::set<uint32_t> candidates = code.CallTargets();
+    candidates.merge(file.CodePointersInData());
+    for (const RUNTIME_FUNCTION& entry : file.Functions()) candidates.insert(entry.BeginAddress);
     constexpr uint8_t kInt3 = 0xCC;
     for (uint32_t padding : file.Find(std::span(&kInt3, 1))) {
-        uint32_t start = padding + 1;
-        auto first = file.Read(start, 1);
-        if (!file.IsCode(start) || first.empty() || first[0] == kInt3) continue;
+        auto next = file.Read(padding + 1, 1);
+        if (!next.empty() && next[0] != kInt3) candidates.insert(padding + 1);
+    }
+    std::set<std::pair<uint32_t, uint32_t>> found;
+    for (uint32_t start : candidates) {
+        if (!file.IsCode(start)) continue;
         std::vector<Step> steps = Walk(file, start, std::nullopt, true, 2);
         if (steps.size() != 2 || !steps[1].jump || !steps[1].target) continue;
         const Step& mark = steps[0];
@@ -179,7 +185,7 @@ void FindSwitcher(const PeFile& file, internals::Switcher& switcher) {
     switcher.syncList = FunctionAt(file, vector.sync, L"card list re-sync");
     switcher.listCards = vector.cards;
     switcher.sortList = FunctionAt(file, FindSort(file, code, vector), L"card list sort");
-    auto [close, closed] = FindCloseList(file);
+    auto [close, closed] = FindCloseList(file, code);
     switcher.closeList = FunctionAt(file, close, L"card list close");
     switcher.listClosed = closed;
     switcher.findDescendant = FunctionAt(file, FindDescendantSearch(file, code), L"descendant search");

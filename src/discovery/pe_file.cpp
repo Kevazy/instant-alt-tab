@@ -113,6 +113,7 @@ std::optional<uint32_t> PeFile::FunctionEnd(uint32_t start) const {
 std::vector<uint32_t> PeFile::Find(std::span<const uint8_t> bytes) const {
     std::vector<uint32_t> found;
     for (const Section& section : sections_) {
+        if (section.fileOffset > data_.size()) continue;
         auto begin = data_.begin() + section.fileOffset;
         auto end = begin + std::min<size_t>(section.fileSize, data_.size() - section.fileOffset);
         for (auto at = std::search(begin, end, bytes.begin(), bytes.end()); at != end;
@@ -130,6 +131,23 @@ bool PeFile::IsReferencedFromData(uint32_t rva) const {
         if (!IsCode(at) && at % sizeof(address) == 0) return true;
     }
     return false;
+}
+
+std::set<uint32_t> PeFile::CodePointersInData() const {
+    std::set<uint32_t> found;
+    for (const Section& section : sections_) {
+        if (section.code || section.fileOffset > data_.size()) continue;
+        size_t size = std::min<size_t>(section.fileSize, data_.size() - section.fileOffset);
+        for (size_t at = 0; at + sizeof(uint64_t) <= size; at += sizeof(uint64_t)) {
+            uint64_t value;
+            std::memcpy(&value, data_.data() + section.fileOffset + at, sizeof(value));
+            if (value > imageBase_ && value - imageBase_ < sizeOfImage_ &&
+                IsCode(static_cast<uint32_t>(value - imageBase_))) {
+                found.insert(static_cast<uint32_t>(value - imageBase_));
+            }
+        }
+    }
+    return found;
 }
 
 std::optional<PeFile::DebugInfo> PeFile::CodeView() const {

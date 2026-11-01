@@ -27,7 +27,7 @@ T Unique(const wchar_t* what, const std::set<T>& found) {
 // A function and its entry bytes, which must be code in the file.
 internals::Function FunctionAt(const PeFile& file, uint32_t rva, const wchar_t* what);
 
-void FindTwinui(const PeFile& file, const std::wstring& cacheDirectory, internals::Twinui& twinui);
+void FindTwinui(const PeFile& file, const std::wstring& cacheDirectory, HANDLE cancel, internals::Twinui& twinui);
 void FindSwitcher(const PeFile& file, internals::Switcher& switcher);
 
 }  // namespace discovery

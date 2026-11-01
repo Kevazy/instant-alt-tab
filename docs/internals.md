@@ -1,9 +1,9 @@
 # How Instant Alt+Tab works
 
 This is the long version of the README's "How it works": what Windows does when Alt+Tab opens, what
-each hook changes, and how the hooks find what they need in whatever Windows build they run on. No
-address or offset is written down anywhere in the source; [Finding the internals](#finding-the-internals)
-explains where each one comes from.
+each hook changes, and how the hooks find what they need in whatever Windows build they run on.
+No address or offset is written down anywhere in the source;
+[Finding the internals](#finding-the-internals) explains where each one comes from.
 
 ## The pieces
 
@@ -65,7 +65,8 @@ isn't reused.
 ### Keeping the menu current
 
 When a card is chosen, the switcher "closes" the list. That sets a flag in the list, which makes
-it drop every data-source event, and unregisters the list's change handler from the data source. Stock Windows throws the list away right after, so this costs nothing.
+it drop every data-source event, and unregisters the list's change handler from the data source.
+Stock Windows throws the list away right after, so this costs nothing.
 A kept list that went through it would never hear of another window change. So the hook skips it for
 the kept list, which leaves the list exactly as it is after Esc. When the kept menu is dropped, the
 list is closed the stock way; otherwise the data source would keep it alive.
@@ -170,11 +171,12 @@ encodings, register use or prologues still match:
 | The vector's storage | the member `RemoveAt` reads as a begin/end pair |
 | The list's close, and its closed flag | a two-instruction function that sets a byte member to 1 and jumps to a function that checks the list's subscription |
 | The descendant search | the recursive function that references the searched element type's interface ID |
-| The control's `NavigateToItem` and `Navigate` | read from the first built control's vtable, and hooked then |
+| The control's `NavigateToItem` and `Navigate` | read from the first built control's vtable, and hooked once Show is seen storing exactly that pointer in the host |
 | Where a card keeps its `ISwitchItem` | the one card holding the item Show navigates to, checked again at every reused opening |
 
-Interface IDs are the one kind of constant in the source: COM never changes an interface's ID; a
-changed interface gets a new one.
+The only constants in the source are public contracts that don't change between Windows versions:
+`CollectionChange` values from the Windows API, and one interface ID (COM never changes an
+interface's ID; a changed interface gets a new one).
 
 ### Checking a Windows build
 

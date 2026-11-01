@@ -41,12 +41,14 @@ struct Twinui {
     Function display;                   // XamlAltTabViewHost::DisplayAltTab(host)
     Function setHostContent;            // sets the host window's XAML content: (window**, content**)
     Function registerRoot;              // RegisterXamlRoot(registrar, root), folded with unrelated functions
+    Function getItemForView;            // CachedDataSource::GetItemForView: Show calls it after storing the control
     uint32_t registerRootReturnInShow;  // return address of Show's call to it: the only call that registers a root
     uint32_t hostContentGetter, hostContentSetter;          // the host window's own get/put XamlContent
     uint32_t hostContentGetterSlot, hostContentSetterSlot;  // and their vtable slots
     uint32_t hostDataSource, hostControl, hostWindow;       // XamlAltTabViewHost members
     uint32_t navigateToItemSlot, navigateSlot;              // the AltTab control's NavigateToItem and Navigate
     GUID switchItem;                                        // ISwitchItem: the shell's item behind each card
+    GUID switchItemDataSource;                              // ISwitchItemDataSource: what the host's data source is
 };
 
 // The switcher DLL is the Alt+Tab UI: the AltTab control and its card list.
@@ -66,7 +68,7 @@ struct Switcher {
 };
 
 inline constexpr uint32_t kMagic = 0x42415441;  // "ATAB"
-inline constexpr uint32_t kVersion = 1;
+inline constexpr uint32_t kVersion = 2;
 
 // Passed to the hook DLL's Start as its parameter.
 struct Internals {

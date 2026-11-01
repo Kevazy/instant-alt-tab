@@ -21,6 +21,8 @@ struct Symbols {
     bool retryLater = false;                             // the download failed; it may work later
 };
 
-Symbols LookUpSymbols(const PeFile& file, const std::vector<std::wstring>& names, const std::wstring& cacheDirectory);
+// `cancel`, if set, stops a download in progress.
+Symbols LookUpSymbols(const PeFile& file, const std::vector<std::wstring>& names, const std::wstring& cacheDirectory,
+                      HANDLE cancel = nullptr);
 
 }  // namespace discovery

@@ -27,6 +27,7 @@ std::wstring SignatureKey(const PeFile::DebugInfo& info) {
 }
 
 // The cache holds a line per requested name: "<rva in hex>,<rva>... <name>", "-" for none.
+// Anything unreadable makes it a miss, so a damaged file is simply rebuilt.
 std::optional<std::map<std::wstring, std::vector<uint32_t>>> ReadCache(const std::wstring& path,
                                                                        const std::vector<std::wstring>& names) {
     std::wifstream stream(path);
@@ -34,28 +35,38 @@ std::optional<std::map<std::wstring, std::vector<uint32_t>>> ReadCache(const std
     std::map<std::wstring, std::vector<uint32_t>> rvas;
     for (std::wstring line; std::getline(stream, line);) {
         size_t space = line.find(L' ');
-        if (space == std::wstring::npos) continue;
+        if (space == std::wstring::npos) return std::nullopt;
         std::vector<uint32_t>& found = rvas[line.substr(space + 1)];
         std::wstringstream list(line.substr(0, space));
         for (std::wstring rva; std::getline(list, rva, L',');) {
-            if (rva != L"-") found.push_back(std::stoul(rva, nullptr, 16));
+            if (rva == L"-") continue;
+            wchar_t* end = nullptr;
+            unsigned long value = wcstoul(rva.c_str(), &end, 16);
+            if (rva.empty() || *end != L'\0') return std::nullopt;
+            found.push_back(static_cast<uint32_t>(value));
         }
     }
     bool complete = std::all_of(names.begin(), names.end(), [&](const auto& name) { return rvas.contains(name); });
     return complete ? std::optional(rvas) : std::nullopt;
 }
 
+// Written to a temporary file first, so an interrupted write never leaves a half cache.
 void WriteCache(const std::wstring& path, const std::map<std::wstring, std::vector<uint32_t>>& rvas) {
-    std::wofstream stream(path, std::ios::trunc);
-    for (const auto& [name, found] : rvas) {
-        std::wstring list;
-        for (uint32_t rva : found) {
-            wchar_t hex[16];
-            swprintf_s(hex, L"%x", rva);
-            list += (list.empty() ? L"" : L",") + std::wstring(hex);
+    std::wstring temporary = path + L".tmp";
+    {
+        std::wofstream stream(temporary, std::ios::trunc);
+        for (const auto& [name, found] : rvas) {
+            std::wstring list;
+            for (uint32_t rva : found) {
+                wchar_t hex[16];
+                swprintf_s(hex, L"%x", rva);
+                list += (list.empty() ? L"" : L",") + std::wstring(hex);
+            }
+            stream << (list.empty() ? L"-" : list) << L' ' << name << L'\n';
         }
-        stream << (list.empty() ? L"-" : list) << L' ' << name << L'\n';
+        if (!stream) return;
     }
+    MoveFileExW(temporary.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING);
 }
 
 struct InternetHandle {
@@ -65,7 +76,7 @@ struct InternetHandle {
     }
 };
 
-std::wstring Download(const std::wstring& path, const std::wstring& to) {
+std::wstring Download(const std::wstring& path, const std::wstring& to, HANDLE cancel) {
     InternetHandle session{WinHttpOpen(L"InstantAltTab", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                                        WINHTTP_NO_PROXY_BYPASS, 0)};
     InternetHandle connection{
@@ -74,6 +85,8 @@ std::wstring Download(const std::wstring& path, const std::wstring& to) {
                                                                   WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES,
                                                                   WINHTTP_FLAG_SECURE)
                                              : nullptr};
+    // Name resolution, connecting and sending may each take 10 s, and a stalled read 30 s.
+    if (session.handle) WinHttpSetTimeouts(session.handle, 10000, 10000, 10000, 30000);
     if (!request.handle || !WinHttpSendRequest(request.handle, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0) ||
         !WinHttpReceiveResponse(request.handle, nullptr)) {
         return L"couldn't reach the symbol server (error " + std::to_wstring(GetLastError()) + L")";
@@ -91,6 +104,7 @@ std::wstring Download(const std::wstring& path, const std::wstring& to) {
             return L"the download broke off (error " + std::to_wstring(GetLastError()) + L")";
         }
         if (read == 0) break;
+        if (cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0) return L"stopped";
         if (total + read > kMaxPdbBytes || !file.write(buffer.data(), read)) return L"couldn't save the download";
     }
     return {};
@@ -159,7 +173,8 @@ std::wstring LookUp(const PeFile& file, const std::wstring& pdbDirectory, const 
 
 }  // namespace
 
-Symbols LookUpSymbols(const PeFile& file, const std::vector<std::wstring>& names, const std::wstring& cacheDirectory) {
+Symbols LookUpSymbols(const PeFile& file, const std::vector<std::wstring>& names, const std::wstring& cacheDirectory,
+                      HANDLE cancel) {
     Symbols symbols;
     auto debug = file.CodeView();
     if (!debug) {
@@ -178,7 +193,7 @@ Symbols LookUpSymbols(const PeFile& file, const std::vector<std::wstring>& names
     CreateDirectoryW(downloadDirectory.c_str(), nullptr);
     std::wstring pdbPath = downloadDirectory + debug->pdbName;
     std::wstring urlPath = L"/download/symbols/" + debug->pdbName + L"/" + key + L"/" + debug->pdbName;
-    if (std::wstring failure = Download(urlPath, pdbPath); !failure.empty()) {
+    if (std::wstring failure = Download(urlPath, pdbPath, cancel); !failure.empty()) {
         DeleteFileW(pdbPath.c_str());
         symbols.error = L"downloading the symbols of " + file.Path() + L" failed: " + failure;
         symbols.retryLater = true;

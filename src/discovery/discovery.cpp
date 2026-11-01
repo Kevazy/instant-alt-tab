@@ -14,7 +14,8 @@ internals::Function FunctionAt(const PeFile& file, uint32_t rva, const wchar_t* 
     return function;
 }
 
-Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath, const std::wstring& cacheDirectory) {
+Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath, const std::wstring& cacheDirectory,
+                HANDLE cancel) {
     Result result;
     auto twinui = PeFile::Load(twinuiPath);
     auto switcher = PeFile::Load(switcherPath);
@@ -24,7 +25,7 @@ Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath
     }
     internals::Internals found;
     try {
-        FindTwinui(*twinui, cacheDirectory, found.twinui);
+        FindTwinui(*twinui, cacheDirectory, cancel, found.twinui);
         FindSwitcher(*switcher, found.switcher);
     } catch (const RuleFailed& failure) {
         result.error = failure.what;

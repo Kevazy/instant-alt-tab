@@ -55,6 +55,11 @@ std::optional<Value> Load(Value base, int64_t delta) {
     return base;
 }
 
+// A constant written to a register of `bits` bits (32-bit writes clear the upper half).
+Value Constant(int64_t value, uint16_t bits) {
+    return Value::Constant(bits == 32 ? static_cast<int64_t>(static_cast<uint32_t>(value)) : value);
+}
+
 // The value a recognised instruction puts in its destination register, if it is one of those.
 std::optional<Value> Result(const ZydisDecodedInstruction& instruction, const ZydisDecodedOperand* operands,
                             const Step& step) {
@@ -63,12 +68,13 @@ std::optional<Value> Result(const ZydisDecodedInstruction& instruction, const Zy
     bool full = operands[0].size == 64;
     switch (instruction.mnemonic) {
         case ZYDIS_MNEMONIC_MOV:
-            if (source.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) return Value::Constant(source.imm.value.s);
+            if (source.type == ZYDIS_OPERAND_TYPE_IMMEDIATE) return Constant(source.imm.value.s, operands[0].size);
             if (source.type == ZYDIS_OPERAND_TYPE_REGISTER) {
                 int from = RegisterIndex(source.reg.value);
                 if (!IsGeneralRegister(from)) return Value{};
                 const Value& value = step.before[from];
-                return full || value.kind == Value::Kind::Constant ? value : Value{};
+                if (full) return value;
+                return value.kind == Value::Kind::Constant ? Constant(value.number, operands[0].size) : Value{};
             }
             if (source.type == ZYDIS_OPERAND_TYPE_MEMORY && full && step.memory && step.memory->index == kNoRegister) {
                 return Load(step.memory->baseValue, step.memory->displacement).value_or(Value{});
@@ -80,7 +86,10 @@ std::optional<Value> Result(const ZydisDecodedInstruction& instruction, const Zy
                 return Value{Value::Kind::GlobalAddress, 0, 0, {}, *step.memory->rva};
             }
             return Offset(step.memory->baseValue, step.memory->displacement).value_or(Value{});
-        case ZYDIS_MNEMONIC_XOR:
+        case ZYDIS_MNEMONIC_XOR: {
+            bool zeroed = source.type == ZYDIS_OPERAND_TYPE_REGISTER && source.reg.value == operands[0].reg.value;
+            return zeroed ? Value::Constant(0) : Value{};
+        }
         case ZYDIS_MNEMONIC_SUB:
             if (source.type == ZYDIS_OPERAND_TYPE_REGISTER && source.reg.value == operands[0].reg.value) {
                 return Value::Constant(0);
@@ -204,6 +213,12 @@ std::vector<CallSite> CodeIndex::CallsFrom(uint32_t function) const {
     return found;
 }
 
+std::set<uint32_t> CodeIndex::CallTargets() const {
+    std::set<uint32_t> targets;
+    for (const CallSite& call : calls_) targets.insert(call.target);
+    return targets;
+}
+
 std::vector<uint32_t> CodeIndex::FunctionsReferencing(uint32_t rva) const {
     std::vector<uint32_t> found;
     for (const Reference& reference : references_) {
@@ -218,9 +233,11 @@ std::optional<uint32_t> VtableSlotCalled(const std::vector<Step>& steps, int dep
     std::optional<uint32_t> slot;
     for (const Step& step : steps) {
         if (!step.call) continue;
-        // The method is either called through memory or loaded into rax for the CFG dispatch thunk.
-        std::optional<Value> method =
-            step.memory ? Load(step.memory->baseValue, step.memory->displacement) : std::optional(step.before[kRax]);
+        // The method is either called through a vtable entry, or loaded into rax for the CFG dispatch
+        // thunk, which is called directly or through a global pointer.
+        bool throughRegister = step.memory && step.memory->base != kRip;
+        std::optional<Value> method = throughRegister ? Load(step.memory->baseValue, step.memory->displacement)
+                                                      : std::optional(step.before[kRax]);
         if (!method || method->kind != Value::Kind::Pointer || method->parameter != 0 || method->loads != depth + 1 ||
             method->number != 0) {
             continue;

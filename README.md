@@ -94,8 +94,9 @@ discovery finds everything in three consecutive monthly builds of the two DLLs.
 ## Safety
 
 - **Nothing is hooked unless everything is found.** Every value must be found exactly once, the
-  hooked code in memory must be the code that was analysed, and the first Alt+Tab confirms the
-  object layout against what Windows actually passes around.
+  hooked code in memory must be the code that was analysed, and the hooks that depend on the
+  layout of Explorer's objects go in only after the first Alt+Tab has confirmed that layout against
+  what Windows actually passes around.
 - **It turns itself off when in doubt.** If Windows does anything unexpected (a failed call, a card
   list that isn't the one the menu shows, an exception), it drops the kept menu, Alt+Tab stays
   stock until Explorer restarts, and a message tells you. `status` shows it too.
