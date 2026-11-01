@@ -272,7 +272,6 @@ void CloseQueuedLists() {
 void DropKeptMenu() {
     if (!g_kept) return;
     KeptMenu& kept = *g_kept;
-    HWND focused = GetForegroundWindow();
     card_list::SetQuietVector(nullptr);
     // Only a list known to be this menu's, or one kept subscribed after a card
     // was chosen, is closed: anything else belongs to whoever created it.
@@ -290,9 +289,6 @@ void DropKeptMenu() {
         if (HostWindowShows(kept.hostWindow.get(), kept.control.get())) Log(L"detaching the hidden menu failed");
     }
     g_kept.reset();
-    // Detaching the hidden menu can hand the keyboard focus to its invisible window.
-    HWND now = GetForegroundWindow();
-    if (now != focused && focused && IsWindow(focused) && now && !IsWindowVisible(now)) SetForegroundWindow(focused);
 }
 
 void Disable() {
@@ -300,9 +296,15 @@ void Disable() {
     if (HANDLE marker = g_activeMarker.exchange(nullptr)) CloseHandle(marker);
 }
 
+// Runs from the worker window, never during an opening (a drop inside Show is
+// followed by the new menu taking the focus anyway).
 void TurnOffNow() {
     Disable();
+    HWND focused = GetForegroundWindow();
     DropKeptMenu();
+    // Detaching the hidden menu can hand the keyboard focus to its invisible window.
+    HWND now = GetForegroundWindow();
+    if (now != focused && focused && IsWindow(focused) && now && !IsWindowVisible(now)) SetForegroundWindow(focused);
 }
 
 // Fails closed: something unexpected happened, so stop keeping menus.
