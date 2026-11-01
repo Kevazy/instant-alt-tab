@@ -35,15 +35,18 @@ functions:
   removals.
 - **Each opening starts like a new menu.** The selection, scroll position and focus a kept menu
   carries over from last time are reset, so it behaves exactly like a freshly built one.
-- **It rebuilds when it has to:** when the display, resolution, DPI, theme or contrast settings
-  change.
+- **It rebuilds when it has to:** when the monitor it opens on, its resolution, work area or DPI,
+  the theme, high contrast or the window colors change. Monitors going to sleep and waking up don't
+  count.
 
 The menu that is kept has to be built once, so the first Alt+Tab after installing, and the first
 after Explorer starts (at sign-in, or after a restart), open at the usual speed. Windows loads part
 of its Alt+Tab code only on the first press; the agent loads it as soon as Explorer starts, so the
 hooks are ready for that first press. (Right after a Windows update the agent first downloads the
 new build's symbols, so that can take a little longer.)
-[docs/internals.md](docs/internals.md) explains each hook and how the internals are found.
+
+[docs/internals.md](docs/internals.md) explains each hook and how the internals are found. If you
+want to work on the code, start with [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Install
 

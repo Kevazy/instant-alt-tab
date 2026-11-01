@@ -37,6 +37,32 @@ Windows' own, and Explorer would have loaded it at the first Alt+Tab anyway.
 
 [CONTRIBUTING.md](../CONTRIBUTING.md) has the code style and a checklist for adding a discovered value.
 
+### Where things are decided
+
+| Question | Where |
+|---|---|
+| Can the kept menu be shown for this opening, or must it be rebuilt? | `ReuseBlocker` in `src/hook/KeptMenuChecks.cpp` |
+| What a kept menu was laid out for (monitor, DPI, theme...) | `DisplayContext` in `KeptMenuState.h`, read by `ReadContext` |
+| Which card an opening starts on | `NavigateToItemHook` and `NavigateHook` in `src/hook/MenuSelection.cpp` |
+| When the hooks turn themselves off | every `TurnOff(reason)` call; the reason goes to `hook.log` |
+| Where the switcher DLL's file is, before Explorer loads it | `RegisteredDllPath` in `src/agent/RegisteredDllPath.cpp` |
+| When the hooks start in a new Explorer | `ServeExplorer` and `StartHooks` in `src/agent/main.cpp` |
+| Whether an Explorer exit counts as a crash | `CrashGuard::IsCrash` in `src/agent/CrashGuard.h` |
+| Which messages the user has seen | `Alert::ShowOnce` in `src/agent/Alert.cpp` |
+
+### Files next to the agent
+
+The agent and the hook DLL keep a few small files in the folder they run from (the install folder,
+`%LOCALAPPDATA%\Programs\InstantAltTab`); `SharedNames.h` names them all.
+
+| File | Written by | Holds |
+|---|---|---|
+| `agent.log`, `hook.log` | the agent, the hook DLL | events worth seeing later: starts, stops, rebuilds and why, failures |
+| `problem.txt` | the agent | why Alt+Tab is stock right now, shown by `status` |
+| `notified.txt` | the agent | which messages were shown, so each appears once per Windows build |
+| `crash-guard.txt` | the agent | recent Explorer crashes, and whether the crash guard disabled it |
+| `symbols\` | discovery | the function names looked up in Windows' public symbols, per twinui build |
+
 ## Words used here
 
 - **Explorer**: `explorer.exe`, the process that draws the taskbar, Start and Alt+Tab (the shell).
@@ -58,7 +84,8 @@ Windows' own, and Explorer would have loaded it at the first Alt+Tab anyway.
   - **disabled**: Explorer crashed twice within an hour after the agent loaded anything into it;
     until the next install.
 - **Discovery**: working out, from the DLL files on the user's PC, every function and offset the
-  hooks need. What it finds are the **internals** (`AltTabInternals.h`).
+  hooks need. What it finds are the **internals** (`AltTabInternals.h`). A **rule** is how one of
+  them is found; every rule must match exactly once.
 - **PE file**: the file format of Windows executables and DLLs. An **RVA** (relative virtual
   address) is an offset from where the DLL is loaded in memory.
 - **Public symbols**: a PDB file Microsoft publishes for most Windows DLLs, which names their
@@ -104,7 +131,9 @@ windows that is ~280 ms before the first frame.
 The kept menu is rebuilt when the data source, the host window, the display Show targets, that
 display's work area or DPI, the theme, high contrast or the window color change. On a typical
 multi-monitor setup the menu always opens on the primary display, whichever monitor has focus, so
-the display is read from the menu's own window, not from the focused window.
+the display is read from the menu's own window, not from the focused window. A monitor is
+identified by its device name and bounds, not its handle: Windows hands out new handles when
+monitors wake from sleep, and comparing handles rebuilt the menu after every display sleep.
 
 The card list is identified from the one sort the control's construction performs, and verified
 at the first dismissal: the control's `ItemsSource` must be that list's vector. Until then the menu
