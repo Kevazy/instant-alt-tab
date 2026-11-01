@@ -13,12 +13,16 @@ No address or offset is written down anywhere in the source;
 | `instant-alt-tab-agent.exe` | the background, from sign-in | loads the hooks into each shell Explorer |
 | `instant-alt-tab-hook.dll` | Explorer | the hooks |
 
-The agent finds the shell Explorer (`GetShellWindow`), waits until Explorer has loaded its Alt+Tab
-modules (they load on the first Alt+Tab), works out from those DLL files what the hooks need
-(`src/discovery`), loads the DLL with `CreateRemoteThread` + `LoadLibraryW`, and calls its `Start`
-export with the results. When Explorer exits it waits for the next one. `Stop` reverses
-everything, and the agent unloads the DLL only once `Stop` has confirmed that no code in it can run
-anymore.
+The agent finds the shell Explorer (`GetShellWindow`) and waits until it has loaded
+`twinui.pcshell.dll`, which it does while starting. Explorer loads the switcher DLL only on the
+first Alt+Tab, so the agent takes its path from where Windows registered it (the `DllPath` of the
+WinRT classes registered to that file, which is where Windows itself loads it from). It works out
+from the two DLL files what the hooks need (`src/discovery`), loads the switcher DLL into Explorer
+if it isn't yet, so the hooks are in place for the first Alt+Tab, then loads the hook DLL with
+`CreateRemoteThread` + `LoadLibraryW` and calls its `Start` export with the results. When Explorer
+exits it waits for the next one. `Stop` reverses everything, and the agent unloads the DLL only
+once `Stop` has confirmed that no code in it can run anymore. The switcher DLL stays loaded: it is
+Windows' own, and Explorer would have loaded it at the first Alt+Tab anyway.
 
 ## The source
 

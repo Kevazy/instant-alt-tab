@@ -56,9 +56,7 @@ DWORD ExplorerProcess::ExitCode() const {
     return code;
 }
 
-bool ExplorerProcess::HasAltTabModules() const {
-    return FindModuleByName(AltTab::kTwinuiDll) && FindModuleByName(AltTab::kSwitcherDll);
-}
+bool ExplorerProcess::HasModule(const wchar_t* name) const { return FindModuleByName(name) != nullptr; }
 
 std::wstring ExplorerProcess::ModulePath(const wchar_t* name) const {
     wchar_t path[MAX_PATH];
@@ -89,19 +87,24 @@ bool ExplorerProcess::IsActive() const { return MarkerExists(Ipc::ActiveMarkerNa
 
 bool ExplorerProcess::HasLoaded(const std::wstring& dllPath) const { return FindModule(dllPath) != nullptr; }
 
-std::optional<DWORD> ExplorerProcess::LoadAndStart(const std::wstring& dllPath, const AltTab::Internals& found) {
+std::optional<bool> ExplorerProcess::Load(const std::wstring& dllPath) {
     size_t bytes = (dllPath.size() + 1) * sizeof(wchar_t);
     void* remotePath = VirtualAllocEx(m_process, nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!remotePath) return 0;
+    if (!remotePath) return false;
     if (!WriteProcessMemory(m_process, remotePath, dllPath.c_str(), bytes, nullptr)) {
         VirtualFreeEx(m_process, remotePath, 0, MEM_RELEASE);
-        return 0;
+        return false;
     }
     // If LoadLibraryW doesn't return in time it may still read the path: keep the buffer.
     if (!RunRemoteThread(Kernel32Function("LoadLibraryW"), remotePath)) return std::nullopt;
     VirtualFreeEx(m_process, remotePath, 0, MEM_RELEASE);
+    return FindModule(dllPath) != nullptr;
+}
 
-    HMODULE module = FindModule(dllPath);
+std::optional<DWORD> ExplorerProcess::LoadAndStart(const std::wstring& dllPath, const AltTab::Internals& found) {
+    std::optional<bool> loaded = Load(dllPath);
+    if (!loaded) return std::nullopt;
+    HMODULE module = *loaded ? FindModule(dllPath) : nullptr;
     if (!module) return 0;
     void* remoteFound = VirtualAllocEx(m_process, nullptr, sizeof(found), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remoteFound || !WriteProcessMemory(m_process, remoteFound, &found, sizeof(found), nullptr)) {
