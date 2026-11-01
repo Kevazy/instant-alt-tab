@@ -2,8 +2,8 @@
 // Double-clicked, it asks whether to install, update or uninstall.
 
 #include "install.h"
-#include "output.h"
-#include "../agent/control.h"
+#include "agent_client.h"
+#include "console.h"
 #include "../agent/crash_guard.h"
 #include "../agent/explorer.h"
 #include "../shared/protocol.h"
@@ -47,7 +47,7 @@ bool PrintStatus() {
                                                   : L"stock (the hooks turned themselves off; see hook.log)";
     Print(L"Installed:          %s", install::IsInstalled() ? install::InstallDirectory().c_str() : L"no");
     Print(L"Starts at sign-in:  %s", install::StartsAtSignIn() ? L"yes" : L"no");
-    Print(L"Agent:              %s", agent_control::IsRunning() ? L"running" : L"not running");
+    Print(L"Agent:              %s", agent_client::IsRunning() ? L"running" : L"not running");
     Print(L"Alt+Tab:            %s", altTab);
     if (install::IsInstalled() && install::Disabled()) {
         Print(L"Turned off after Explorer crashed twice within an hour; install again to turn it back on.");
@@ -64,7 +64,7 @@ bool Start() {
         Print(L"Turned off after Explorer crashed twice within an hour; install again to turn it back on.");
         return false;
     }
-    if (!agent_control::IsRunning() && !agent_control::Launch(directory + protocol::kAgentExecutable)) {
+    if (!agent_client::IsRunning() && !agent_client::Launch(directory + protocol::kAgentExecutable)) {
         Print(L"Starting the agent failed (error %lu).", GetLastError());
         return false;
     }

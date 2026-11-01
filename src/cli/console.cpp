@@ -1,4 +1,4 @@
-#include "output.h"
+#include "console.h"
 
 #include <windows.h>
 

@@ -63,6 +63,7 @@ int wmain(int argc, wchar_t** argv) {
     Print(L"display", t.display);
     Print(L"setHostContent", t.setHostContent);
     Print(L"registerRoot", t.registerRoot);
+    Print(L"getItemForView", t.getItemForView);
     Print(L"registerRootReturnInShow", t.registerRootReturnInShow);
     Print(L"hostContentGetter", t.hostContentGetter);
     Print(L"hostContentSetter", t.hostContentSetter);
@@ -76,6 +77,8 @@ int wmain(int argc, wchar_t** argv) {
     wchar_t id[40];
     StringFromGUID2(t.switchItem, id, 40);
     wprintf(L"%-28s %s\n", L"switchItem", id);
+    StringFromGUID2(t.switchItemDataSource, id, 40);
+    wprintf(L"%-28s %s\n", L"switchItemDataSource", id);
     Print(L"switcher.timeDateStamp", s.module.timeDateStamp);
     Print(L"switcher.sizeOfImage", s.module.sizeOfImage);
     Print(L"syncList", s.syncList);

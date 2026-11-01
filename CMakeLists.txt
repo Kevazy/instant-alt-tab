@@ -48,14 +48,13 @@ add_library(hook SHARED
     src/hook/main.cpp
     src/hook/hooking.cpp
     src/hook/card_list.cpp
-    src/hook/kept_menu.cpp)
+    src/hook/persistent_menu.cpp)
 set_target_properties(hook PROPERTIES OUTPUT_NAME instant-alt-tab-hook)
 set_project_warnings(hook)
 target_link_libraries(hook PRIVATE shared minhook windowsapp shcore)
 
-# Talking to Explorer and to the agent; used by the agent and the CLI.
+# Finding and injecting into Explorer, and the crash guard; used by the agent and the CLI.
 add_library(agent_core STATIC
-    src/agent/control.cpp
     src/agent/crash_guard.cpp
     src/agent/explorer.cpp)
 set_project_warnings(agent_core)
@@ -70,7 +69,8 @@ target_link_libraries(agent PRIVATE agent_core discovery shared)
 add_executable(cli
     src/cli/main.cpp
     src/cli/install.cpp
-    src/cli/output.cpp)
+    src/cli/agent_client.cpp
+    src/cli/console.cpp)
 set_target_properties(cli PROPERTIES OUTPUT_NAME instant-alt-tab)
 set_project_warnings(cli)
 target_compile_definitions(cli PRIVATE "PROJECT_VERSION=L\"${PROJECT_VERSION}\"")
@@ -78,7 +78,7 @@ target_link_libraries(cli PRIVATE agent_core shared shell32 ole32)
 
 # Finds the Windows internals the hooks need in the DLLs Explorer has loaded; used by the agent.
 add_library(discovery STATIC
-    src/discovery/code.cpp
+    src/discovery/code_analysis.cpp
     src/discovery/discovery.cpp
     src/discovery/pe_file.cpp
     src/discovery/switcher.cpp

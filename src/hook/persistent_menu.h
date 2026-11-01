@@ -8,7 +8,7 @@
 
 #include "hooking.h"
 
-namespace kept_menu {
+namespace persistent_menu {
 
 bool Install(const ModuleImage& twinui, const ModuleImage& switcher, const internals::Internals& found);
 void Enable();
@@ -17,4 +17,4 @@ void Enable();
 // false if the UI thread didn't confirm within the timeout.
 bool Stop(DWORD timeoutMs);
 
-}  // namespace kept_menu
+}  // namespace persistent_menu

@@ -1,8 +1,8 @@
-#include "control.h"
+#include "agent_client.h"
 
 #include "../shared/protocol.h"
 
-namespace agent_control {
+namespace agent_client {
 
 bool IsRunning() {
     HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, protocol::kAgentMutex);
@@ -43,4 +43,4 @@ bool RequestStop(DWORD timeoutMs) {
     return stopped;
 }
 
-}  // namespace agent_control
+}  // namespace agent_client

@@ -1,4 +1,4 @@
-#include "kept_menu.h"
+#include "persistent_menu.h"
 
 #include "card_list.h"
 #include "../shared/log.h"
@@ -22,7 +22,7 @@
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
-namespace kept_menu {
+namespace persistent_menu {
 namespace {
 
 namespace xaml = winrt::Windows::UI::Xaml;
@@ -887,4 +887,4 @@ bool Stop(DWORD timeoutMs) {
     return WaitForSingleObject(g_stoppedEvent, timeoutMs) == WAIT_OBJECT_0;
 }
 
-}  // namespace kept_menu
+}  // namespace persistent_menu

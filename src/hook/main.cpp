@@ -4,7 +4,7 @@
 
 #include "card_list.h"
 #include "hooking.h"
-#include "kept_menu.h"
+#include "persistent_menu.h"
 #include "../shared/log.h"
 #include "../shared/protocol.h"
 
@@ -43,7 +43,7 @@ void PinModule() {
 // Turns everything off; returns false if code of this DLL may still run.
 bool Shutdown() {
     g_shutDown = true;
-    bool uiThreadDone = kept_menu::Stop(kUiThreadTimeoutMs);
+    bool uiThreadDone = persistent_menu::Stop(kUiThreadTimeoutMs);
     DisableHooks();
     return ReleaseHooks(uiThreadDone ? kDrainTimeoutMs : 0) && uiThreadDone;
 }
@@ -57,12 +57,12 @@ DWORD StartHooks(const internals::Internals& found) {
         return protocol::kUnsupportedBuild;
     }
     if (!InitializeHooks()) return protocol::kStartFailed;
-    if (!card_list::Install(*switcher, found.switcher) || !kept_menu::Install(*twinui, *switcher, found)) {
+    if (!card_list::Install(*switcher, found.switcher) || !persistent_menu::Install(*twinui, *switcher, found)) {
         ReleaseHooks(0);  // nothing was enabled
         Log(L"not started: a function's code in memory isn't what the agent analysed, or creating a hook failed");
         return protocol::kUnsupportedBuild;
     }
-    kept_menu::Enable();
+    persistent_menu::Enable();
     if (!EnableHooks()) {
         Log(L"not started: enabling the hooks failed");
         // Some hooks may have been enabled, and one may already have run.

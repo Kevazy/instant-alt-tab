@@ -3,7 +3,7 @@
 // The rules for each DLL, and what they share. A rule that doesn't match
 // exactly once throws RuleFailed, naming what it looked for.
 
-#include "code.h"
+#include "code_analysis.h"
 #include "../shared/internals.h"
 
 #include <set>

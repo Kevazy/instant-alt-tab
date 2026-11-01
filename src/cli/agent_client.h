@@ -6,7 +6,7 @@
 
 #include <string>
 
-namespace agent_control {
+namespace agent_client {
 
 bool IsRunning();
 // Starts the agent detached, with its own folder as working directory.
@@ -15,4 +15,4 @@ bool Launch(const std::wstring& agentExecutable);
 // false if it didn't exit within the timeout.
 bool RequestStop(DWORD timeoutMs);
 
-}  // namespace agent_control
+}  // namespace agent_client

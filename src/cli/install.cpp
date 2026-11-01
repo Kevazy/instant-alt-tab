@@ -1,7 +1,7 @@
 #include "install.h"
 
-#include "output.h"
-#include "../agent/control.h"
+#include "agent_client.h"
+#include "console.h"
 #include "../agent/crash_guard.h"
 #include "../agent/explorer.h"
 #include "../shared/protocol.h"
@@ -113,7 +113,7 @@ bool StartsAtSignIn() {
 bool Disabled() { return CrashGuard(InstallDirectory()).Disabled(); }
 
 bool Stop(const std::wstring& dllPath) {
-    if (!agent_control::RequestStop(kStopTimeoutMs)) {
+    if (!agent_client::RequestStop(kStopTimeoutMs)) {
         Print(L"The agent didn't stop within %lu seconds.", kStopTimeoutMs / 1000);
         return false;
     }
@@ -155,7 +155,7 @@ bool Install(const std::wstring& sourceDirectory) {
         return false;
     }
     if (!RegisterUninstaller(target)) Print(L"Adding Instant Alt+Tab to Settings > Apps failed; it works anyway.");
-    if (!agent_control::Launch(target + protocol::kAgentExecutable)) {
+    if (!agent_client::Launch(target + protocol::kAgentExecutable)) {
         Print(L"Installed, but starting the agent failed (error %lu); it starts at the next sign-in.", GetLastError());
         return false;
     }

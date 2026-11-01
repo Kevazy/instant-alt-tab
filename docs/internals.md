@@ -43,7 +43,7 @@ windows that is ~280 ms before the first frame.
 
 ## The hooks
 
-### Keeping the menu (`kept_menu.cpp`)
+### Keeping the menu (`persistent_menu.cpp`)
 
 | Hooked | Why |
 |---|---|
