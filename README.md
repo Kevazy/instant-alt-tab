@@ -93,8 +93,18 @@ code does ([details](docs/internals.md#finding-the-internals)). Updates that onl
 are handled without a new release.
 
 If an update changes Alt+Tab in a way it doesn't recognize, it leaves Alt+Tab alone and shows a
-message once; `status` says why. It was developed and tested on Windows 11 25H2, and its
-discovery finds everything in three consecutive monthly builds of the two DLLs.
+message once; `status` says why. The same happens, with a daily check, in the rare case Microsoft
+hasn't published a build's symbols yet.
+
+What has been checked:
+
+- **Windows 11 24H2 and 25H2** (builds 26100 and 26200): discovery finds everything in every
+  monthly update from November 2024 to the newest, October 2026, and the hooks were tested live on
+  25H2. Builds from before November 2024 have a differently built Alt+Tab, and stay unchanged.
+- **Windows 11 26H1** (28000) and **Insider builds** up to 29698: discovery finds everything,
+  wherever Microsoft has published the symbols. Not tested live.
+- **Windows 11 22H2/23H2**: Alt+Tab is built differently there, and stays unchanged. Windows 10
+  wasn't tested.
 
 ## Safety
 

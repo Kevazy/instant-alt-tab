@@ -235,6 +235,7 @@ From the named functions the rest follows by reading what their code does with t
 | The window content setter slot, and the getter's | the slot the named setter calls; WinRT puts a property's getter right before its setter |
 | The one real `RegisterXamlRoot` call | the only call to it in Show (the function is shared with unrelated folded code) |
 | `ISwitchItem`'s interface ID | the named `guid_v<ISwitchItem>` constant |
+| The vtables of `SwitchItem`, the class behind each card's item | the named `SwitchItem::vftable` symbols; optional, used to learn the card layout in an opening where Show selects no window |
 
 **The switcher DLL** has no public symbols. Its functions are found by what they do, with the
 instructions decoded (Zydis) and the registers followed, so recompiles that only change instruction
@@ -250,7 +251,11 @@ encodings, register use or prologues still match:
 | The list's close, and its closed flag | a two-instruction function that sets a byte member to 1 and jumps to a function that checks the list's subscription |
 | The descendant search | the recursive function that references the searched element type's interface ID |
 | The control's `NavigateToItem` and `Navigate` | read from the first built control's vtable, and hooked once Show is seen storing exactly that pointer in the host |
-| Where a card keeps its `ISwitchItem` | the one card holding the item Show navigates to, checked again at every reused opening |
+| Where a card keeps its `ISwitchItem` | the one card holding the item Show navigates to; or, when Show selects no window (the first opening after Explorer starts, before Windows' window list is filled), the one offset at which every card holds a `SwitchItem`, recognized by its vtable. Checked again at every reused opening |
+
+The code walker follows a function from its start, and code reached only by a jump starts from
+the registers at the jumps to it. That is approximate, so every rule also checks that what it found
+is consistent (exactly one match, members that don't overlap, the same value from every caller).
 
 The only constants in the source are public contracts that don't change between Windows versions:
 `CollectionChange` values from the Windows API, and one interface ID (COM never changes an
@@ -266,6 +271,17 @@ several builds without touching Explorer:
 ```
 discover --twinui <path>\twinui.pcshell.dll --switcher <path>\WindowsInternal.ComposableShell.Experiences.Switcher.dll
 ```
+
+Other builds' files can be found without installing them:
+
+- **twinui.pcshell.dll**: [Winbindex](https://winbindex.m417z.com) lists every released build with
+  its timestamp and size, and Microsoft's symbol server serves the file itself at
+  `https://msdl.microsoft.com/download/symbols/twinui.pcshell.dll/<TIMESTAMP><SizeOfImage>/twinui.pcshell.dll`
+  (timestamp as 8 hex digits, size in hex).
+- **The switcher DLL**: the symbol server doesn't have it. It comes from Windows' own update
+  packages: UUP dump lists every build's packages, including Insider builds, and the file can be
+  extracted from them, or rebuilt from a cumulative update's deltas.
+- Both DLLs must be read from a path shorter than 260 characters.
 
 On a build where it works, check at minimum:
 
