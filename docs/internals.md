@@ -71,6 +71,7 @@ The agent and the hook DLL keep a few small files in the folder they run from (t
   its symbols.
 - **The switcher DLL**: `WindowsInternal.ComposableShell.Experiences.Switcher.dll`, the menu itself:
   the `AltTab` control and its card list. It has no public symbols.
+- **The data model DLL**: `SwitcherDataModel.dll`, which implements the items behind the cards.
 - **Card**: one window's tile in the menu. The shell's object behind it is an *item* (`ISwitchItem`).
 - **Card list**: the switcher's list of cards, which XAML displays and the shell keeps up to date.
 - **Opening**: one appearance of the menu, from Alt+Tab until it closes.
@@ -235,7 +236,6 @@ From the named functions the rest follows by reading what their code does with t
 | The window content setter slot, and the getter's | the slot the named setter calls; WinRT puts a property's getter right before its setter |
 | The one real `RegisterXamlRoot` call | the only call to it in Show (the function is shared with unrelated folded code) |
 | `ISwitchItem`'s interface ID | the named `guid_v<ISwitchItem>` constant |
-| The vtables of `SwitchItem`, the class behind each card's item | the named `SwitchItem::vftable` symbols; optional, used to learn the card layout in an opening where Show selects no window |
 
 **The switcher DLL** has no public symbols. Its functions are found by what they do, with the
 instructions decoded (Zydis) and the registers followed, so recompiles that only change instruction
@@ -251,7 +251,12 @@ encodings, register use or prologues still match:
 | The list's close, and its closed flag | a two-instruction function that sets a byte member to 1 and jumps to a function that checks the list's subscription |
 | The descendant search | the recursive function that references the searched element type's interface ID |
 | The control's `NavigateToItem` and `Navigate` | read from the first built control's vtable, and hooked once Show is seen storing exactly that pointer in the host |
-| Where a card keeps its `ISwitchItem` | the one card holding the item Show navigates to; or, when Show selects no window (the first opening after Explorer starts, before Windows' window list is filled), the one offset at which every card holds a `SwitchItem`, recognized by its vtable. Checked again at every reused opening |
+| Where a card keeps its `ISwitchItem` | the one card holding the item Show navigates to; or, when Show selects no window (the first opening after Explorer starts, before Windows' window list is filled), the one offset at which every card holds a different item object, recognized by its class's vtable (below). Checked again at every reused opening |
+
+**SwitcherDataModel.dll** implements the items behind the cards (the class `RootSwitchItem`). Its
+small PDB (under 1 MB) gives the vtables of that class, by the name `RootSwitchItem::vftable`. They
+are optional: without them the card layout is learned one opening later, from an item Show
+navigates to.
 
 The code walker follows a function from its start, and code reached only by a jump starts from
 the registers at the jumps to it. That is approximate, so every rule also checks that what it found

@@ -22,9 +22,10 @@ struct Result {
     bool notPublished = false;  // because Microsoft hasn't published the symbols (yet)
 };
 
+// `dataModelPath` may be empty: what it gives is optional.
 // `cacheDirectory` (with a trailing backslash) keeps the looked-up symbol names.
 // `cancel`, if set, stops a symbol download in progress.
-Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath, const std::wstring& cacheDirectory,
-                HANDLE cancel = nullptr);
+Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath, const std::wstring& dataModelPath,
+                const std::wstring& cacheDirectory, HANDLE cancel = nullptr);
 
 }  // namespace Discovery

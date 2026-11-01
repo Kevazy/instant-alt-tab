@@ -126,9 +126,9 @@ if you want to check what it does or build it yourself.
 ## Footprint
 
 - **Disk:** about 1.5 MB installed, plus a few KB of looked-up symbol names per Windows build.
-- **Network:** once per Windows update, the agent downloads twinui.pcshell.dll's public symbols
-  (about 30 MB) from Microsoft's symbol server, keeps a dozen names from it and deletes it. Nothing
-  else is downloaded or sent.
+- **Network:** once per Windows update, the agent downloads the public symbols of twinui.pcshell.dll
+  (about 30 MB) and SwitcherDataModel.dll (under 1 MB) from Microsoft's symbol server, keeps the
+  dozen names it needs and deletes them. Nothing else is downloaded or sent.
 - **Explorer:** keeps one Alt+Tab menu alive instead of building one per press; it is the same menu
   Windows builds every time you press Alt+Tab. Over a 30-opening test with windows opening and
   closing, Explorer's memory and handle count stayed flat. Windows' Alt+Tab menu DLL is loaded when

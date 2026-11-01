@@ -7,8 +7,10 @@
 #include "QuietCardEdits.h"
 #include "../shared/Log.h"
 
+#include <algorithm>
 #include <array>
 #include <set>
+#include <vector>
 
 #include <winrt/Windows.UI.Xaml.Input.h>
 
@@ -26,6 +28,24 @@ NavigateFn g_originalNavigate;
 constexpr size_t kCardScanBytes = 0x200;     // how far into a card its item is looked for
 std::array<void*, 2> g_navigationTargets{};  // the control's NavigateToItem and Navigate, once hooked
 thread_local bool t_selectingFirstCard = false;
+
+// Which module an object's vtable is in, and where: for the log.
+std::wstring DescribeVtable(const void* object) {
+    auto vtable = static_cast<const BYTE*>(ReadPointer(object, 0));
+    HMODULE module = nullptr;
+    wchar_t path[MAX_PATH] = L"?";
+    if (!vtable ||
+        !GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            reinterpret_cast<LPCWSTR>(vtable), &module)) {
+        return L"vtable outside any module";
+    }
+    GetModuleFileNameW(module, path, MAX_PATH);
+    const wchar_t* name = wcsrchr(path, L'\\');
+    wchar_t text[MAX_PATH + 40];
+    swprintf_s(text, L"vtable %s+0x%llx", name ? name + 1 : path,
+               static_cast<unsigned long long>(vtable - reinterpret_cast<const BYTE*>(module)));
+    return text;
+}
 
 com_ptr<IUnknown> SwitchItemOf(IInspectable* card) {
     com_ptr<IUnknown> item;
@@ -66,20 +86,38 @@ void LearnCardItemOffset(IUnknown* item) {
     }
     if (holders == 1 && offsets.size() == 1) {
         g_cardItemOffset = *offsets.begin();
-        Log(L"cards keep their item at +0x%zx", g_cardItemOffset);
+        g_cardItemOffsetConfirmed = true;
+        Log(L"cards keep their item at +0x%zx (%s)", g_cardItemOffset, DescribeVtable(item).c_str());
     } else {
         Log(L"couldn't tell where cards keep their item (%zu cards hold it, at %zu offsets)", holders, offsets.size());
     }
 }
 
-// Whether `object` is a SwitchItem, by its vtable: nothing is called on it.
-bool IsSwitchItem(const void* object) {
-    void* vtable = object ? ReadPointer(object, 0) : nullptr;
-    if (!vtable) return false;
-    for (uint32_t rva : g_twinuiInternals.switchItemVtables) {
-        if (rva && vtable == g_twinuiImage.base + rva) return true;
+// The item class's vtables in memory, if its DLL is loaded and is the file discovery analysed.
+std::vector<const void*> ItemVtables() {
+    std::vector<const void*> vtables;
+    if (!g_dataModelInternals.itemVtables[0]) return vtables;
+    auto module = FindModule(AltTab::kDataModelDll, g_dataModelInternals.module);
+    if (!module) return vtables;
+    for (uint32_t rva : g_dataModelInternals.itemVtables) {
+        if (!rva) continue;
+        const BYTE* vtable = module->base + rva;
+        if (!module->Contains(vtable) || IsCode(*module, vtable)) return {};
+        vtables.push_back(vtable);
     }
-    return false;
+    return vtables;
+}
+
+// Whether a value read from a card could point to an object: aligned, and in
+// the user-mode address range. Anything else isn't followed.
+bool PlausibleObject(const void* value) {
+    static const SYSTEM_INFO info = [] {
+        SYSTEM_INFO i;
+        GetSystemInfo(&i);
+        return i;
+    }();
+    return value >= info.lpMinimumApplicationAddress && value <= info.lpMaximumApplicationAddress &&
+           reinterpret_cast<uintptr_t>(value) % alignof(void*) == 0;
 }
 
 bool IsKeptControl(IUnknown* control) {
@@ -112,40 +150,54 @@ bool HookNavigation(IUnknown* control) {
 }  // namespace
 
 size_t g_cardItemOffset = 0;
+bool g_cardItemOffsetConfirmed = false;
 
 // Learns where cards keep their item when Show selected no window to learn it
 // from, as in the first opening after Explorer starts, before Windows' window
-// list is filled: every card must hold a SwitchItem (recognized by its vtable)
-// at one and the same offset, and it must be the item's ISwitchItem interface.
+// list is filled. The items are objects of one class (RootSwitchItem, from
+// SwitcherDataModel.dll), recognized by its vtables without calling anything:
+// there must be exactly one offset at which every card holds a different
+// object with the same one of those vtables, and each of those objects must
+// be its own ISwitchItem interface, the pointer Show navigates to. The result
+// is confirmed (or corrected) by the next item Show navigates to.
 void LearnCardItemOffsetFromItemClass() {
     auto cards = QuietCardEdits::Cards(g_kept->cards.get());
-    if (cards.empty() || !g_twinuiInternals.switchItemVtables[0]) return;
-    std::set<size_t> offsets;
-    size_t holders = 0;
-    for (IInspectable* card : cards) {
-        bool holds = false;
-        for (size_t offset = sizeof(void*); offset < kCardScanBytes; offset += sizeof(void*)) {
-            if (IsSwitchItem(ReadPointer(card, offset))) {
-                offsets.insert(offset);
-                holds = true;
+    std::vector<const void*> vtables = ItemVtables();
+    if (cards.size() < 2 || vtables.empty()) return;  // one card proves too little
+    std::vector<size_t> offsets;
+    for (size_t offset = sizeof(void*); offset < kCardScanBytes; offset += sizeof(void*)) {
+        const void* vtable = nullptr;
+        std::set<const void*> objects;
+        bool everyCard = true;
+        for (IInspectable* card : cards) {
+            const void* object = ReadPointer(card, offset);
+            const void* objectVtable = PlausibleObject(object) ? ReadPointer(object, 0) : nullptr;
+            if (!vtable && std::find(vtables.begin(), vtables.end(), objectVtable) != vtables.end()) {
+                vtable = objectVtable;
+            }
+            if (!vtable || objectVtable != vtable || !objects.insert(object).second) {
+                everyCard = false;
+                break;
             }
         }
-        holders += holds;
+        if (everyCard) offsets.push_back(offset);
     }
-    if (holders != cards.size() || offsets.size() != 1) {
-        Log(L"couldn't tell where cards keep their item from its class (%zu of %zu cards hold one, at %zu offsets)",
-            holders, cards.size(), offsets.size());
+    if (offsets.size() != 1) {
+        Log(L"couldn't tell where cards keep their item from its class (%zu offsets fit)", offsets.size());
         return;
     }
-    auto object = static_cast<IUnknown*>(ReadPointer(cards.front(), *offsets.begin()));
-    com_ptr<IUnknown> item;
-    object->QueryInterface(g_twinuiInternals.switchItem, item.put_void());
-    if (item.get() != object) {
-        Log(L"the SwitchItem cards hold isn't their ISwitchItem; card layout not learned");
-        return;
+    for (IInspectable* card : cards) {
+        auto object = static_cast<IUnknown*>(ReadPointer(card, offsets.front()));
+        com_ptr<IUnknown> item;
+        object->QueryInterface(g_twinuiInternals.switchItem, item.put_void());
+        if (item.get() != object) {
+            Log(L"the item-class objects cards hold aren't their ISwitchItem; card layout not learned");
+            return;
+        }
     }
-    g_cardItemOffset = *offsets.begin();
-    Log(L"cards keep their item at +0x%zx (found from the item class)", g_cardItemOffset);
+    g_cardItemOffset = offsets.front();
+    g_cardItemOffsetConfirmed = false;
+    Log(L"cards keep their item at +0x%zx (from the item class, to be confirmed)", g_cardItemOffset);
 }
 
 // Moves the selection to the first card through the control's own NavigateToItem.
@@ -207,9 +259,16 @@ HRESULT NavigateToItemHook(IUnknown* control, IUnknown* item) {
     if (opening && LooksLikeComObject(item) && !t_selectingFirstCard && IsKeptControl(control)) {
         if (!g_cardItemOffset) {
             LearnCardItemOffset(item);
-        } else if (size_t holders = CardsHolding(item); holders > 1) {
+        } else if (size_t holders = CardsHolding(item); holders == 1) {
+            g_cardItemOffsetConfirmed = true;
+        } else if (!g_cardItemOffsetConfirmed) {
+            // Learned from the item class, and this item disagrees: learn it from the item instead.
+            Log(L"the card layout learned from the item class doesn't fit Show's item; learning it from the item");
+            g_cardItemOffset = 0;
+            LearnCardItemOffset(item);
+        } else if (holders > 1) {
             TurnOff(L"cards no longer hold their item where they did");
-        } else if (holders == 0) {
+        } else {
             g_kept->missedWindow = true;  // a window too new for the kept list: rebuild next time
             Log(L"the kept card list doesn't have the foreground window yet");
         }

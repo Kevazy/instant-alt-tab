@@ -7,9 +7,7 @@
 
 #include <intrin.h>
 
-#include <algorithm>
 #include <cstring>
-#include <iterator>
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
@@ -17,6 +15,7 @@ namespace KeptMenu {
 
 ModuleImage g_twinuiImage, g_switcherImage;
 AltTab::TwinuiInternals g_twinuiInternals;
+AltTab::DataModelInternals g_dataModelInternals;
 uint32_t g_listClosedOffset = 0;
 std::optional<MenuState> g_kept;
 Opening* g_opening = nullptr;
@@ -225,7 +224,8 @@ HRESULT ShowHook(void* host, void* display, int flags, void* view) {
     // Normally confirmed in GetItemForViewHook already; this covers a Show that doesn't call it.
     bool confirmedDuringShow = opening.confirmed;
     ConfirmBuiltControl(opening);
-    if (opening.built && !g_cardItemOffset && g_kept && g_kept->control == opening.built) {
+    if (opening.built && !g_cardItemOffset && opening.firstNavigation != FirstNavigation::ToItem && g_kept &&
+        g_kept->control == opening.built) {
         LearnCardItemOffsetFromItemClass();
     }
     if (opening.built && !g_cardItemOffset) {
@@ -411,6 +411,7 @@ bool InstallHooks(const ModuleImage& twinui, const ModuleImage& switcher, const 
     g_twinuiImage = twinui;
     g_switcherImage = switcher;
     g_twinuiInternals = found.twinui;
+    g_dataModelInternals = found.dataModel;
     g_listClosedOffset = found.switcher.listClosed;
     // The one real RegisterXamlRoot call: a direct call to it right before that return address.
     const BYTE* call = twinui.base + g_twinuiInternals.registerRootReturnInShow - 5;
@@ -418,15 +419,6 @@ bool InstallHooks(const ModuleImage& twinui, const ModuleImage& switcher, const 
     int32_t displacement;
     std::memcpy(&displacement, call + 1, sizeof(displacement));
     if (call + 5 + displacement != twinui.base + g_twinuiInternals.registerRoot.rva) return false;
-    // The item class's vtables are read-only data in twinui, or they aren't used.
-    for (uint32_t rva : g_twinuiInternals.switchItemVtables) {
-        if (rva && (!twinui.Contains(twinui.base + rva) || IsCode(twinui, twinui.base + rva))) {
-            std::fill(std::begin(g_twinuiInternals.switchItemVtables), std::end(g_twinuiInternals.switchItemVtables),
-                      0);
-            Log(L"the item class's vtables aren't where discovery found them; not used");
-            break;
-        }
-    }
     bool hooked =
         CreateHook(twinui, g_twinuiInternals.show, &ShowHook, &g_originalShow) &&
         CreateHook(twinui, g_twinuiInternals.createControl, &CreateControlHook, &g_originalCreateControl) &&

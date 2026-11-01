@@ -31,5 +31,11 @@ AltTab::FunctionLocation FunctionAt(const PeFile& file, uint32_t rva, const wcha
 void FindTwinuiInternals(const PeFile& file, const std::wstring& cacheDirectory, HANDLE cancel,
                          AltTab::TwinuiInternals& twinui);
 void FindSwitcherInternals(const PeFile& file, AltTab::SwitcherInternals& switcher);
+// Optional: never throws; leaves `dataModel` zero when anything is missing.
+void FindDataModelInternals(const PeFile& file, const std::wstring& cacheDirectory, HANDLE cancel,
+                            AltTab::DataModelInternals& dataModel);
+
+// Whether `rva` is a vtable: data whose first entry (QueryInterface, for a COM class) is code.
+bool IsVtable(const PeFile& file, uint32_t rva);
 
 }  // namespace Discovery

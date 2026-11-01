@@ -33,6 +33,7 @@ void Print(const wchar_t* name, const AltTab::FunctionLocation& function) {
 int wmain(int argc, wchar_t** argv) {
     std::wstring twinui = SystemPath(L"\\System32\\twinui.pcshell.dll");
     std::wstring switcher = SystemPath(L"\\ShellComponents\\WindowsInternal.ComposableShell.Experiences.Switcher.dll");
+    std::wstring dataModel = SystemPath(L"\\System32\\SwitcherDataModel.dll");
     wchar_t temp[MAX_PATH];
     GetTempPathW(MAX_PATH, temp);
     std::wstring cache = std::wstring(temp) + L"instant-alt-tab-symbols\\";
@@ -42,13 +43,15 @@ int wmain(int argc, wchar_t** argv) {
             twinui = argv[i + 1];
         else if (option == L"--switcher")
             switcher = argv[i + 1];
+        else if (option == L"--datamodel")
+            dataModel = argv[i + 1];
         else if (option == L"--cache")
             cache = std::wstring(argv[i + 1]) + L"\\";
     }
     CreateDirectoryW(cache.c_str(), nullptr);
 
     ULONGLONG started = GetTickCount64();
-    Discovery::Result result = Discovery::Discover(twinui, switcher, cache);
+    Discovery::Result result = Discovery::Discover(twinui, switcher, dataModel, cache);
     if (!result.internals) {
         fwprintf(stderr, L"not found%s: %s\n", result.retryLater ? L" (retry later)" : L"", result.error.c_str());
         return 1;
@@ -79,9 +82,6 @@ int wmain(int argc, wchar_t** argv) {
     wprintf(L"%-28s %s\n", L"switchItem", id);
     StringFromGUID2(t.switchItemDataSource, id, 40);
     wprintf(L"%-28s %s\n", L"switchItemDataSource", id);
-    wprintf(L"%-28s", L"switchItemVtables");
-    for (uint32_t rva : t.switchItemVtables) wprintf(L" 0x%x", rva);
-    wprintf(L"\n");
     Print(L"switcher.timeDateStamp", s.module.timeDateStamp);
     Print(L"switcher.sizeOfImage", s.module.sizeOfImage);
     Print(L"syncList", s.syncList);
@@ -95,6 +95,11 @@ int wmain(int argc, wchar_t** argv) {
     Print(L"listClosed", s.listClosed);
     Print(L"vectorStorage", s.vectorStorage);
     Print(L"vectorObserved", s.vectorObserved);
+    const AltTab::DataModelInternals& d = result.internals->dataModel;
+    Print(L"dataModel.timeDateStamp", d.module.timeDateStamp);
+    wprintf(L"%-28s", L"itemVtables");
+    for (uint32_t rva : d.itemVtables) wprintf(L" 0x%x", rva);
+    wprintf(L"\n");
     fwprintf(stderr, L"found in %llu ms\n", GetTickCount64() - started);
     return 0;
 }

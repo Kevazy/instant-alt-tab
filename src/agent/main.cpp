@@ -47,6 +47,22 @@ WakeReason WaitFor(HANDLE stop, HANDLE explorer, DWORD timeoutMs, HANDLE turnedO
     }
 }
 
+// Waits `ms` of wall-clock time: a wait's timeout doesn't count time the PC
+// sleeps, so a long one is made of pieces of at most an hour.
+WakeReason WaitWallClock(HANDLE stop, HANDLE explorer, ULONGLONG ms) {
+    auto now = [] {
+        FILETIME time;
+        GetSystemTimeAsFileTime(&time);
+        return (static_cast<ULONGLONG>(time.dwHighDateTime) << 32 | time.dwLowDateTime) / 10000;
+    };
+    for (ULONGLONG until = now() + ms, current = now(); current < until; current = now()) {
+        WakeReason wake =
+            WaitFor(stop, explorer, static_cast<DWORD>(std::min<ULONGLONG>(until - current, kMaxRetryMs)));
+        if (wake != WakeReason::Timeout) return wake;
+    }
+    return WakeReason::Timeout;
+}
+
 const wchar_t* Describe(std::optional<DWORD> result) {
     if (!result) return L"Explorer didn't answer in time; leaving this Explorer alone";
     switch (*result) {
@@ -100,11 +116,11 @@ std::wstring BuildKey(const ExplorerProcess& explorer, const std::wstring& switc
 // noticed at once, even during the symbol download. Returns nothing, with
 // `wake` set, when interrupted.
 std::optional<Discovery::Result> DiscoverInBackground(const std::wstring& twinui, const std::wstring& switcher,
-                                                      const std::wstring& cache, HANDLE stop, HANDLE explorer,
-                                                      WakeReason& wake) {
+                                                      const std::wstring& dataModel, const std::wstring& cache,
+                                                      HANDLE stop, HANDLE explorer, WakeReason& wake) {
     HANDLE cancel = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     auto result = std::make_shared<Discovery::Result>();
-    std::thread worker([=] { *result = Discovery::Discover(twinui, switcher, cache, cancel); });
+    std::thread worker([=] { *result = Discovery::Discover(twinui, switcher, dataModel, cache, cancel); });
     HANDLE handles[] = {stop, explorer, worker.native_handle()};
     DWORD waited = WaitForMultipleObjects(3, handles, FALSE, INFINITE);
     if (waited == WAIT_OBJECT_0 + 2) {
@@ -137,10 +153,13 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
         Log(L"Explorer %lu: its Alt+Tab DLLs couldn't be read; it's probably exiting", explorer.Pid());
         return std::nullopt;
     }
+    // Optional: the class of the shell's items, from the DLL that implements them.
+    std::wstring dataModel = explorer.ModulePath(AltTab::kDataModelDll);
+    if (dataModel.empty()) dataModel = RegisteredDllPath(AltTab::kDataModelDll);
     for (DWORD retryMs = kFirstRetryMs;; retryMs = std::min(retryMs * 2, kMaxRetryMs)) {
         ULONGLONG started = GetTickCount64();
         std::optional<Discovery::Result> result = DiscoverInBackground(
-            twinui, switcher, directory + SharedNames::kSymbolsFolder, stop, explorer.Handle(), wake);
+            twinui, switcher, dataModel, directory + SharedNames::kSymbolsFolder, stop, explorer.Handle(), wake);
         if (!result) return std::nullopt;
         auto switcherImage = explorer.LoadedImage(AltTab::kSwitcherDll);
         if (result->internals && (result->internals->twinui.module != *twinuiImage ||
@@ -168,7 +187,8 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
         WriteTextFile(directory + SharedNames::kProblemFile,
                       L"waiting to download Windows' public symbols: " + result->error);
         Log(L"Explorer %lu: %s; trying again in %lu minutes", explorer.Pid(), result->error.c_str(), waitMs / 60000);
-        wake = WaitFor(stop, explorer.Handle(), waitMs);
+        wake = result->notPublished ? WaitWallClock(stop, explorer.Handle(), waitMs)
+                                    : WaitFor(stop, explorer.Handle(), waitMs);
         if (wake != WakeReason::Timeout) return std::nullopt;
     }
 }

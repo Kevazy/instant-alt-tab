@@ -83,6 +83,7 @@ target_link_libraries(cli PRIVATE agent_core shared shell32 ole32)
 add_library(discovery STATIC
     src/discovery/CodeAnalysis.cpp
     src/discovery/Discovery.cpp
+    src/discovery/FindDataModelInternals.cpp
     src/discovery/PeFile.cpp
     src/discovery/FindSwitcherInternals.cpp
     src/discovery/Symbols.cpp

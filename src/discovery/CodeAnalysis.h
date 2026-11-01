@@ -6,9 +6,10 @@
 // parameter, a constant, or a global. Rules can then say "the first argument
 // of this call is parameter 0 plus 0xa8" however the compiler encoded it.
 //
-// The walk is linear and ignores branches, so a value is what the most recent
-// instruction before it in the code set. That is all the rules need, and each
-// rule also requires its match to be unique.
+// The walk is linear: a value is what the most recent instruction before it
+// set, except that code reached only by jumps starts from the registers at the
+// forward jumps to it, and a loop head reached that way starts unknown. That
+// is approximate, which is why each rule also requires its match to be unique.
 
 #include "PeFile.h"
 

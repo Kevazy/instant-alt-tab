@@ -14,6 +14,7 @@ namespace AltTab {
 
 inline constexpr wchar_t kTwinuiDll[] = L"twinui.pcshell.dll";
 inline constexpr wchar_t kSwitcherDll[] = L"WindowsInternal.ComposableShell.Experiences.Switcher.dll";
+inline constexpr wchar_t kDataModelDll[] = L"SwitcherDataModel.dll";
 
 // The interface ID of an element type the Alt+Tab menu never contains. After
 // every card change the switcher searches each card for it; the hook answers
@@ -57,9 +58,6 @@ struct TwinuiInternals {
     uint32_t navigateToItemSlot, navigateSlot;              // the AltTab control's NavigateToItem and Navigate
     GUID switchItem;                                        // ISwitchItem: the shell's item behind each card
     GUID switchItemDataSource;                              // ISwitchItemDataSource: what the host's data source is
-    // The vtables of SwitchItem, the class of those items; zero if the symbols
-    // don't have them. Lets the hook recognize an item by reading memory.
-    uint32_t switchItemVtables[4];
 };
 
 // The switcher DLL is the Alt+Tab UI: the AltTab control and its card list.
@@ -78,10 +76,18 @@ struct SwitcherInternals {
     uint32_t vectorObserved;          // card vector member: notifications are raised only while this byte is set
 };
 
+// SwitcherDataModel.dll implements the shell's items. Optional: all zero when
+// its symbols can't be had, and the hook then learns where cards keep their
+// item one opening later.
+struct DataModelInternals {
+    ImageIdentity module;
+    uint32_t itemVtables[4];  // RootSwitchItem's, the class of every card's item: recognizable by reading memory
+};
+
 // Identify the struct below. The version is its layout's, not the program's:
 // raise it whenever a field is added, removed or moved.
 inline constexpr uint32_t kInternalsMagic = 0x42415441;  // "ATAB"
-inline constexpr uint32_t kInternalsVersion = 3;
+inline constexpr uint32_t kInternalsVersion = 4;
 
 // Everything above, passed to the hook DLL's Start as its parameter. The agent
 // copies it into Explorer's memory byte for byte, so its layout is the contract
@@ -92,6 +98,7 @@ struct Internals {
     uint32_t size = sizeof(Internals);
     TwinuiInternals twinui{};
     SwitcherInternals switcher{};
+    DataModelInternals dataModel{};
 };
 
 }  // namespace AltTab

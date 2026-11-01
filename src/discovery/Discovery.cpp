@@ -14,8 +14,16 @@ AltTab::FunctionLocation FunctionAt(const PeFile& file, uint32_t rva, const wcha
     return function;
 }
 
-Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath, const std::wstring& cacheDirectory,
-                HANDLE cancel) {
+bool IsVtable(const PeFile& file, uint32_t rva) {
+    auto entry = file.Read(rva, sizeof(uint64_t));
+    if (file.IsCode(rva) || entry.empty()) return false;
+    uint64_t address;
+    std::memcpy(&address, entry.data(), sizeof(address));
+    return address > file.ImageBase() && file.IsCode(static_cast<uint32_t>(address - file.ImageBase()));
+}
+
+Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath, const std::wstring& dataModelPath,
+                const std::wstring& cacheDirectory, HANDLE cancel) {
     Result result;
     auto twinui = PeFile::Load(twinuiPath);
     auto switcher = PeFile::Load(switcherPath);
@@ -35,6 +43,9 @@ Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath
     }
     found.twinui.module = {twinui->TimeDateStamp(), twinui->SizeOfImage()};
     found.switcher.module = {switcher->TimeDateStamp(), switcher->SizeOfImage()};
+    if (auto dataModel = dataModelPath.empty() ? std::nullopt : PeFile::Load(dataModelPath)) {
+        FindDataModelInternals(*dataModel, cacheDirectory, cancel, found.dataModel);
+    }
     result.internals = found;
     return result;
 }

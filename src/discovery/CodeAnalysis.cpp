@@ -114,8 +114,16 @@ const Value& Step::Argument(int n) const {
     return before[kArguments[n]];
 }
 
-std::vector<Step> Walk(const PeFile& file, uint32_t start, std::optional<uint32_t> end, bool startsWithParameters,
-                       size_t maxSteps) {
+namespace {
+
+// One pass of Walk. Code right after an unconditional jump or a return is
+// reached only through branches, so it starts from what the registers held at
+// the forward branches to it (registers they disagree on are unknown), not
+// from the unrelated code above it. A loop head is also reached from below,
+// so its registers are unknown instead. `joined` collects where the forward
+// branches' state was used.
+std::vector<Step> WalkOnce(const PeFile& file, uint32_t start, std::optional<uint32_t> end, bool startsWithParameters,
+                           size_t maxSteps, const std::set<uint32_t>& loopHeads, std::set<uint32_t>& joined) {
     std::array<Value, kRegisters> registers{};
     if (startsWithParameters) {
         registers[kRcx] = Value::Parameter(0);
@@ -125,17 +133,16 @@ std::vector<Step> Walk(const PeFile& file, uint32_t start, std::optional<uint32_
     }
     std::vector<Step> steps;
     uint32_t limit = end.value_or(start + static_cast<uint32_t>(kMaxUnboundedWalk));
-    // What the registers held at forward branches, by target. Code right after
-    // an unconditional jump or a return is reached only through branches, so it
-    // starts from their state (registers they disagree on are unknown) instead
-    // of the unrelated code above it.
-    std::map<uint32_t, std::array<Value, kRegisters>> branchedTo;
+    std::map<uint32_t, std::array<Value, kRegisters>> branchedTo;  // the registers at forward branches, by target
     bool fallsThrough = true;
     for (uint32_t rva = start; rva < limit && steps.size() < maxSteps;) {
-        if (auto joined = branchedTo.find(rva); joined != branchedTo.end()) {
-            if (!fallsThrough) registers = joined->second;
-            branchedTo.erase(joined);
+        if (!fallsThrough && loopHeads.contains(rva)) {
+            registers.fill(Value{});
+        } else if (auto branches = branchedTo.find(rva); branches != branchedTo.end() && !fallsThrough) {
+            registers = branches->second;
+            joined.insert(rva);
         }
+        branchedTo.erase(rva);
         auto bytes = file.Read(rva, std::min<size_t>(ZYDIS_MAX_INSTRUCTION_LENGTH, limit - rva));
         ZydisDecodedInstruction instruction;
         ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
@@ -200,6 +207,27 @@ std::vector<Step> Walk(const PeFile& file, uint32_t start, std::optional<uint32_
         if (!end && (step.ret || step.jump)) break;
     }
     return steps;
+}
+
+}  // namespace
+
+std::vector<Step> Walk(const PeFile& file, uint32_t start, std::optional<uint32_t> end, bool startsWithParameters,
+                       size_t maxSteps) {
+    // A backward branch to a point where forward branches' state was used makes
+    // it a loop head; walk again without that state there, until none is left.
+    std::set<uint32_t> loopHeads;
+    for (;;) {
+        std::set<uint32_t> joined;
+        std::vector<Step> steps = WalkOnce(file, start, end, startsWithParameters, maxSteps, loopHeads, joined);
+        bool found = false;
+        for (const Step& step : steps) {
+            if ((step.jump || step.conditionalJump) && step.target && *step.target <= step.rva &&
+                joined.contains(*step.target)) {
+                found |= loopHeads.insert(*step.target).second;
+            }
+        }
+        if (!found) return steps;
+    }
 }
 
 std::vector<Step> WalkFunction(const PeFile& file, uint32_t function) {

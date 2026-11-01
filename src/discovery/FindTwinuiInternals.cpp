@@ -4,9 +4,7 @@
 #include "FindInternals.h"
 #include "Symbols.h"
 
-#include <algorithm>
 #include <cstring>
-#include <iterator>
 
 namespace Discovery {
 
@@ -40,8 +38,6 @@ const std::wstring kContentSetter =
 const std::wstring kDataSourceId = L"_uuidof_?AUISwitchItemDataSourceMultitaskingComposableShellInternalWindows";
 const std::wstring kSwitchItemId =
     L"winrt::impl::guid_v<winrt::Windows::Internal::ComposableShell::Multitasking::ISwitchItem>";
-// The class of the shell's items: one vtable per interface it implements.
-const std::wstring kSwitchItemVtable = L"SwitchItem::`vftable'";
 
 class Names {
 public:
@@ -49,7 +45,7 @@ public:
         std::vector<std::wstring> names{
             kCreateControl,  kShow,           kDismiss,      kDisplay,        kRegisterRoot,
             kGetItemForView, kNavigateToItem, kNavigate,     kDataSourceToCx, kContentProperty,
-            kContentGetter,  kContentSetter,  kSwitchItemId, kDataSourceId,   kSwitchItemVtable};
+            kContentGetter,  kContentSetter,  kSwitchItemId, kDataSourceId};
         Symbols symbols = LookUpSymbols(file, names, cacheDirectory, cancel);
         if (!symbols.error.empty()) throw RuleFailed{symbols.error, symbols.retryLater, symbols.notPublished};
         m_rvas = std::move(symbols.rvas);
@@ -91,15 +87,6 @@ GUID InterfaceId(const PeFile& file, uint32_t rva, const wchar_t* what) {
     GUID id;
     std::memcpy(&id, bytes.data(), sizeof(GUID));
     return id;
-}
-
-// Whether `rva` is a vtable: data whose first entry (QueryInterface, for a COM class) is code.
-bool IsVtable(const PeFile& file, uint32_t rva) {
-    auto entry = file.Read(rva, sizeof(uint64_t));
-    if (file.IsCode(rva) || entry.empty()) return false;
-    uint64_t address;
-    std::memcpy(&address, entry.data(), sizeof(address));
-    return address > file.ImageBase() && file.IsCode(static_cast<uint32_t>(address - file.ImageBase()));
 }
 
 uint32_t SlotCalledBy(const PeFile& file, uint32_t wrapper, int depth, const wchar_t* what) {
@@ -156,14 +143,6 @@ void FindTwinuiInternals(const PeFile& file, const std::wstring& cacheDirectory,
 
     twinui.switchItem = InterfaceId(file, names.One(kSwitchItemId), L"ISwitchItem");
     twinui.switchItemDataSource = InterfaceId(file, names.One(kDataSourceId), L"ISwitchItemDataSource");
-
-    // Optional: without them the hook learns where cards keep their item from
-    // the first opening that selects a window, one opening later.
-    std::set<uint32_t> vtables = names.All(kSwitchItemVtable);
-    bool usable = vtables.size() <= std::size(twinui.switchItemVtables) &&
-                  std::all_of(vtables.begin(), vtables.end(), [&](uint32_t rva) { return IsVtable(file, rva); });
-    std::fill(std::begin(twinui.switchItemVtables), std::end(twinui.switchItemVtables), 0);
-    if (usable) std::copy(vtables.begin(), vtables.end(), twinui.switchItemVtables);
 
     // Show asks for the foreground window's item after storing the control and
     // before positioning the selection; the hooks check the control there.
