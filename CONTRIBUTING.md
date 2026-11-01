@@ -16,7 +16,7 @@ Names follow Microsoft's C++ style, the one used in Windows Terminal and PowerTo
 | An executable's entry point | `main.cpp`; the DLL's is `DllMain.cpp` | |
 | Folders | lowercase | `src/discovery` |
 | Namespaces, types, functions | PascalCase | `Discovery::Discover`, `class CrashGuard` |
-| Free functions of a module | in a namespace named after its file | `PersistentMenu::InstallHooks` |
+| Each part of the program | a namespace named after it; small helpers used everywhere (`Log`, `ReadPointer`) are plain functions | `Discovery::Discover`, `PersistentMenu::InstallHooks` |
 | Locals, parameters, struct fields | camelCase | `hostControl` |
 | Class members | `m_` + camelCase; static ones `s_` | `m_process` |
 | Globals and thread-locals | `g_` and `t_` + camelCase | `g_internals` |

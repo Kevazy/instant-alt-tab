@@ -48,7 +48,10 @@ add_library(hook SHARED
     src/hook/DllMain.cpp
     src/hook/Hooking.cpp
     src/hook/CardListUpdates.cpp
-    src/hook/PersistentMenu.cpp)
+    src/hook/PersistentMenu.cpp
+    src/hook/KeptMenuChecks.cpp
+    src/hook/MenuSelection.cpp
+    src/hook/ComObjects.cpp)
 set_target_properties(hook PROPERTIES OUTPUT_NAME instant-alt-tab-hook)
 set_project_warnings(hook)
 target_link_libraries(hook PRIVATE shared minhook windowsapp shcore)

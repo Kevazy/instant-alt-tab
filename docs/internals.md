@@ -31,7 +31,7 @@ Windows' own, and Explorer would have loaded it at the first Alt+Tab anyway.
 | `src/cli` | `instant-alt-tab.exe` | the commands (`main.cpp`), installing and uninstalling (`Installer`), starting and stopping the agent (`AgentClient`), console output (`Console`) |
 | `src/agent` | `instant-alt-tab-agent.exe` | the loop that serves each Explorer (`main.cpp`); finding Explorer and loading, starting and stopping the hook DLL in it (`ExplorerProcess`); turning everything off after repeated Explorer crashes (`CrashGuard`); the message window (`Alert`) |
 | `src/discovery` | part of the agent | finding what the hooks need: the entry point (`Discovery`), the rules for each DLL (`TwinuiRules`, `SwitcherRules`, `Rules.h`), downloading and reading public symbols (`Symbols`), reading DLL files (`PeFile`), following what machine code does (`CodeAnalysis`) |
-| `src/hook` | `instant-alt-tab-hook.dll` | the `Start` and `Stop` exports (`DllMain.cpp`), keeping the menu (`PersistentMenu`), quiet card edits (`CardListUpdates`), the layer over MinHook (`Hooking`) |
+| `src/hook` | `instant-alt-tab-hook.dll` | the `Start` and `Stop` exports (`DllMain.cpp`), keeping the menu: its hooks and life (`PersistentMenu`), whether it still fits an opening (`KeptMenuChecks`), the selection each opening starts with (`MenuSelection`); quiet card edits (`CardListUpdates`); reading COM objects at discovered offsets (`ComObjects`); the layer over MinHook (`Hooking`) |
 | `src/shared` | all three | what discovery hands the hooks (`AltTabInternals.h`), the names and codes the three programs agree on (`Ipc.h`), the log (`Log`), small text files (`TextFile`) |
 | `tools` | built on request | `Discover` runs discovery on any copies of the two DLLs; `MeasureLatency` measures how long the menu takes to appear |
 
@@ -90,7 +90,7 @@ windows that is ~280 ms before the first frame.
 
 ## The hooks
 
-### Keeping the menu (`PersistentMenu.cpp`)
+### Keeping the menu (`PersistentMenu.cpp`, `KeptMenuChecks.cpp`)
 
 | Hooked | Why |
 |---|---|
@@ -128,7 +128,7 @@ then put the old contents back silently and replay only the longest-common-subse
 notifications on. XAML sees a consistent list after every step. If the replay doesn't reproduce the
 switcher's result, one `Reset` is sent instead.
 
-### Starting each opening like a new menu
+### Starting each opening like a new menu (`MenuSelection.cpp`)
 
 A kept control carries state from its last opening that a new control doesn't have. Each piece is
 reset or made irrelevant:
