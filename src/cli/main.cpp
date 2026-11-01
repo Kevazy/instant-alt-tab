@@ -66,7 +66,12 @@ bool Start() {
         Print(L"Turned off after Explorer crashed twice within an hour; install again to turn it back on.");
         return false;
     }
-    if (!AgentClient::IsRunning() && !AgentClient::Launch(directory + SharedNames::kAgentExecutable)) {
+    std::wstring agent = directory + SharedNames::kAgentExecutable;
+    if (GetFileAttributesW(agent.c_str()) == INVALID_FILE_ATTRIBUTES) {
+        Print(L"Not installed: run instant-alt-tab without a command to install it.");
+        return false;
+    }
+    if (!AgentClient::IsRunning() && !AgentClient::Launch(agent)) {
         Print(L"Starting the agent failed (error %lu).", GetLastError());
         return false;
     }
@@ -110,14 +115,14 @@ bool Interactive() {
         Print(L"Instant Alt+Tab keeps the Alt+Tab menu ready, so it opens instantly instead of being rebuilt");
         Print(L"every time. It installs for this user only (no administrator rights) and starts with Windows.");
         Print(L"");
-        return !Confirm(L"Install it now?", true) || Installer::Install(here);
+        return !Confirm(L"Install it now?", true) || Installer::Install();
     }
     PrintStatus();
     Print(L"");
     if (_wcsicmp(here.c_str(), Installer::InstallDirectory().c_str()) != 0) {
-        return !Confirm(L"Replace the installed copy with this one?", true) || Installer::Install(here);
+        return !Confirm(L"Replace the installed copy with this one?", true) || Installer::Install();
     }
-    if (Installer::DisabledByCrashGuard()) return !Confirm(L"Turn it back on?", true) || Installer::Install(here);
+    if (Installer::DisabledByCrashGuard()) return !Confirm(L"Turn it back on?", true) || Installer::Install();
     return !Confirm(L"Uninstall Instant Alt+Tab?", false) || Installer::Uninstall(here);
 }
 
@@ -131,7 +136,7 @@ int wmain(int argc, wchar_t** argv) {
     if (command.empty() && ownConsole) {
         succeeded = Interactive();
     } else if (command == L"install") {
-        succeeded = Installer::Install(ExecutableDirectory());
+        succeeded = Installer::Install();
     } else if (command == L"uninstall") {
         succeeded = Installer::Uninstall(ExecutableDirectory());
     } else if (command == L"status") {

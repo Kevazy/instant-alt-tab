@@ -1,8 +1,8 @@
 # Contributing
 
-[docs/internals.md](docs/internals.md) explains how everything works, where each part of the source
-lives, and the words used for it; read its [glossary](docs/internals.md#words-used-here) first if
-terms like vtable, RVA or PDB are new. The README's [Building](README.md#building) section covers the build.
+[docs/internals.md](docs/internals.md) explains how everything works and the words used for it;
+read its [glossary](docs/internals.md#words-used-here) first if terms like vtable, RVA or PDB are
+new. The README's [Building](README.md#building) section covers the build.
 
 ## Code style
 
@@ -13,37 +13,51 @@ Names follow Microsoft's C++ style, the one used in Windows Terminal and PowerTo
 
 | What | Style | Example |
 |---|---|---|
-| Source files | PascalCase, after the type or module they hold | `KeptMenu.cpp`, `ExplorerProcess.h` |
+| Source files | PascalCase, after the type or module they hold | `MenuState.h` |
 | An executable's entry point | `main.cpp`; the DLL's is `DllMain.cpp` | |
 | Folders | lowercase | `src/discovery` |
 | Namespaces, types, functions | PascalCase | `Discovery::Discover`, `class CrashGuard` |
-| Each part of the program | a namespace named after it; small helpers used everywhere (`Log`, `ReadPointer`) are plain functions | `Discovery::Discover`, `KeptMenu::InstallHooks` |
-| Locals, parameters, struct fields | camelCase | `hostControl` |
-| Class members | `m_` + camelCase; static ones `s_` | `m_process` |
-| Globals and thread-locals | `g_` and `t_` + camelCase | `g_twinuiInternals` |
-| Constants and enumerators | `k` + PascalCase | `kAgentMutex` |
+| Each part of the program | a namespace or class named after it; small helpers used everywhere are plain functions | `Discovery::Discover` |
+| Locals, parameters, struct fields | camelCase | `menuCount` |
+| Class members | `m_` + camelCase; static ones `s_` | `m_handle` |
+| Globals and thread-locals | `g_` and `t_` + camelCase | `g_menuCount` |
+| Constants, and values of plain enums | `k` + PascalCase | `kTimeoutMs` |
+| Values of `enum class` | PascalCase | `Reason::Timeout` |
 
 Names that exist outside the source don't follow this, and must not change: the executable and DLL
 names (lowercase with hyphens, like most command-line tools), the files the agent writes, the named
 mutexes and events, and the DLL's exports. Installed copies and running agents rely on them.
 
-Comments say why, in plain words. A newcomer should be able to follow the code with
-[docs/internals.md](docs/internals.md) at hand.
+Comments say why, in plain words, next to the code they explain. The docs describe ideas, not
+where things are, so they only need changing when an idea changes.
 
-## Adding a value discovery must find
+## Working on it
 
-An optional value from another DLL follows `SwitcherDataModel.dll`: its own `Find...Internals.cpp`
-that never throws, a struct in `AltTabInternals.h` that stays zero when nothing is found, a path in
-`Discovery::DllPaths` (the agent fills it in `DiscoverWithRetries`), and a hook that works without it.
+- **There are no automated tests**, and CI only builds. A change is checked by running it: `discover`
+  on as many Windows builds as you can get, the checklist in the docs'
+  [Checking a Windows build](docs/internals.md#checking-a-windows-build), and `measure-latency`.
+- **Run `instant-alt-tab stop` before rebuilding**: Explorer keeps the hook DLL loaded, so the build
+  can't replace it. If the DLL stays loaded anyway, restart Explorer.
+- **A bug in the hooks can crash Explorer.** After two crashes within an hour the agent stops loading
+  anything, and `crash-guard.txt` next to it (in the build folder too) remembers that; delete it to
+  try again.
+- **`hook.log` and `agent.log`** next to the agent say what happened, including every rebuild and
+  why the hooks turned off.
+- **Releases**: pushing a tag like `v1.2.0` builds and publishes one; the version itself is set in
+  `CMakeLists.txt`. The `debug` build preset exists for stepping through the code.
 
-1. Add the field to `src/shared/AltTabInternals.h` and raise `kInternalsVersion`: the agent copies
-   that struct into Explorer as is, so its layout is the contract with the hook DLL.
-2. Write the rule in `src/discovery/FindTwinuiInternals.cpp` or `FindSwitcherInternals.cpp`. A rule must match
-   exactly once (`ExactlyOne`); anything else is an error, and the hooks stay off.
-3. Print it in `tools/Discover.cpp`.
-4. Use it in the hook through the DLL's copy (`g_twinuiInternals`, `g_switcherInternals` or
-   `g_dataModelInternals`), and check it at run time where a wrong value could do
-   harm (see "Safety" in the docs).
-5. Describe the rule in the "Finding the internals" table of `docs/internals.md`.
-6. Run `discover` on every build of the DLLs you have; the docs'
-   [Checking a Windows build](docs/internals.md#checking-a-windows-build) says where to find them.
+## Changing what discovery finds
+
+- **The agent and the hook DLL share one struct** of everything discovery found, copied into
+  Explorer as is. Its layout is their contract: raise its version whenever it changes.
+- **A rule must match exactly once.** Anything else is an error, and the hooks stay off. Check what
+  the rule found for consistency too, and describe the rule in a comment next to it.
+- **A function that gets hooked** is recorded with its first bytes, which are checked in memory
+  before hooking; other values are plain offsets.
+- **`discover` prints every value**, so add new ones to its output.
+- **Check at run time** what a wrong value could do harm with, and turn the hooks off on a mismatch
+  (see "Safety" in the docs).
+- **Something optional** (like the data model DLL's item class) must never stop the hooks: the
+  struct stays zero when it isn't found, and the hooks work without it.
+- **Run `discover` on as many builds as you can get**; the docs'
+  [Checking a Windows build](docs/internals.md#checking-a-windows-build) says where to find them.

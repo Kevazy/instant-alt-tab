@@ -13,7 +13,9 @@ bool IsInstalled();
 bool StartsAtSignIn();
 bool DisabledByCrashGuard();
 
-bool Install(const std::wstring& sourceDirectory);
+// Copies this executable to the install folder and writes the agent and the
+// hook DLL it carries next to it.
+bool Install();
 bool Uninstall(const std::wstring& runningFrom);
 
 // Stops a running agent, and removes the hooks of the copy at dllPath if an

@@ -68,12 +68,18 @@ set_target_properties(agent PROPERTIES OUTPUT_NAME instant-alt-tab-agent)
 set_project_warnings(agent)
 target_link_libraries(agent PRIVATE agent_core discovery shared)
 
-# The command-line tool: install, uninstall, status, start, stop.
+# The command-line tool: install, uninstall, status, start, stop. It is the one file users
+# download: the agent and the hook DLL are built into it, as resources named after their files,
+# and installing writes them next to it.
+file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/embedded-$<CONFIG>.rc CONTENT
+    "\"$<TARGET_FILE_NAME:agent>\" RCDATA \"$<TARGET_FILE:agent>\"\n\"$<TARGET_FILE_NAME:hook>\" RCDATA \"$<TARGET_FILE:hook>\"\n")
 add_executable(cli
     src/cli/main.cpp
     src/cli/Installer.cpp
     src/cli/AgentClient.cpp
-    src/cli/Console.cpp)
+    src/cli/Console.cpp
+    ${CMAKE_BINARY_DIR}/embedded-$<CONFIG>.rc)
+add_dependencies(cli agent hook)
 set_target_properties(cli PROPERTIES OUTPUT_NAME instant-alt-tab)
 set_project_warnings(cli)
 target_compile_definitions(cli PRIVATE "PROJECT_VERSION=L\"${PROJECT_VERSION}\"")

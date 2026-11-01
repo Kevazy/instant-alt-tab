@@ -41,17 +41,46 @@ bool SetValue(const wchar_t* key, const wchar_t* name, DWORD value) {
     return RegSetKeyValueW(HKEY_CURRENT_USER, key, name, REG_DWORD, &value, sizeof(value)) == ERROR_SUCCESS;
 }
 
-bool CopyWithRetry(const std::wstring& from, const std::wstring& to) {
+std::wstring ExecutablePath() {
+    wchar_t path[MAX_PATH];
+    GetModuleFileNameW(nullptr, path, MAX_PATH);
+    return path;
+}
+
+// Retries `write` while the file is still mapped by a process that just exited.
+template <typename Write>
+bool WithRetry(Write write) {
     for (DWORD waited = 0;; waited += 250) {
-        if (CopyFileW(from.c_str(), to.c_str(), FALSE)) {
-            // A copy of a downloaded file keeps its "downloaded from the internet"
-            // mark, which can make Windows ask before running it at sign-in.
-            DeleteFileW((to + L":Zone.Identifier").c_str());
-            return true;
-        }
+        if (write()) return true;
         if (GetLastError() != ERROR_SHARING_VIOLATION || waited >= kCopyRetryMs) return false;
         Sleep(250);
     }
+}
+
+bool CopyExecutable(const std::wstring& from, const std::wstring& to) {
+    if (!WithRetry([&] { return CopyFileW(from.c_str(), to.c_str(), FALSE) != FALSE; })) return false;
+    // A copy of a downloaded file keeps its "downloaded from the internet"
+    // mark, which can make Windows ask before running it at sign-in.
+    DeleteFileW((to + L":Zone.Identifier").c_str());
+    return true;
+}
+
+// The agent and the hook DLL are built into this executable (see CMakeLists.txt),
+// as resources named after their files, so a single downloaded file installs everything.
+bool WriteEmbeddedFile(const wchar_t* name, const std::wstring& to) {
+    HRSRC resource = FindResourceW(nullptr, name, RT_RCDATA);
+    HGLOBAL loaded = resource ? LoadResource(nullptr, resource) : nullptr;
+    const void* data = loaded ? LockResource(loaded) : nullptr;
+    if (!data) return false;
+    DWORD size = SizeofResource(nullptr, resource);
+    return WithRetry([&] {
+        HANDLE file = CreateFileW(to.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (file == INVALID_HANDLE_VALUE) return false;
+        DWORD written = 0;
+        bool complete = WriteFile(file, data, size, &written, nullptr) && written == size;
+        CloseHandle(file);
+        return complete;
+    });
 }
 
 bool RegisterUninstaller(const std::wstring& target) {
@@ -129,7 +158,7 @@ bool StopAgentAndHooks(const std::wstring& dllPath) {
     return true;
 }
 
-bool Install(const std::wstring& sourceDirectory) {
+bool Install() {
     std::wstring target = InstallDirectory();
     if (target.empty()) {
         Print(L"Couldn't find the folder for per-user programs (%%LOCALAPPDATA%%\\Programs).");
@@ -139,13 +168,17 @@ bool Install(const std::wstring& sourceDirectory) {
         Print(L"Couldn't stop the running copy: sign out and in (or restart Explorer), then install again.");
         return false;
     }
-    if (_wcsicmp(sourceDirectory.c_str(), target.c_str()) != 0) {
-        CreateDirectoryW(target.c_str(), nullptr);
-        for (const wchar_t* file : {kCliExecutable, SharedNames::kAgentExecutable, SharedNames::kHookDll}) {
-            if (!CopyWithRetry(sourceDirectory + file, target + file)) {
-                Print(L"Copying %s to %s failed (error %lu).", file, target.c_str(), GetLastError());
-                return false;
-            }
+    CreateDirectoryW(target.c_str(), nullptr);
+    std::wstring self = ExecutablePath();
+    if (_wcsicmp(self.c_str(), (target + kCliExecutable).c_str()) != 0 &&
+        !CopyExecutable(self, target + kCliExecutable)) {
+        Print(L"Copying %s to %s failed (error %lu).", kCliExecutable, target.c_str(), GetLastError());
+        return false;
+    }
+    for (const wchar_t* file : {SharedNames::kAgentExecutable, SharedNames::kHookDll}) {
+        if (!WriteEmbeddedFile(file, target + file)) {
+            Print(L"Writing %s to %s failed (error %lu).", file, target.c_str(), GetLastError());
+            return false;
         }
     }
     CrashGuard(target).Clear();
@@ -160,8 +193,8 @@ bool Install(const std::wstring& sourceDirectory) {
         return false;
     }
     Print(L"Installed to %s", target.c_str());
-    Print(L"Instant Alt+Tab is running and starts with Windows. Alt+Tab opens at the usual speed once or");
-    Print(L"twice while it sets up, then instantly. Uninstall it from Settings > Apps.");
+    Print(L"Instant Alt+Tab is running and starts with Windows. Alt+Tab opens at the usual speed once");
+    Print(L"while it sets up, then instantly. Uninstall it from Settings > Apps.");
     return true;
 }
 
