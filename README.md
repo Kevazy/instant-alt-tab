@@ -38,14 +38,14 @@ functions:
 - **It rebuilds when it has to:** when the display, resolution, DPI, theme or contrast settings
   change.
 
-After Explorer starts, the first two Alt+Tabs open at the usual speed: the first loads Windows'
-Alt+Tab code, which the hooks attach to, and the second builds the menu that is kept from then on.
-[docs/internals.md](docs/internals.md) explains each hook and how the internals were found.
+The menu that is kept has to be built once, so the first Alt+Tab after installing opens at the usual
+speed. After Explorer starts (at sign-in, or after a restart), the first two do: Windows loads its
+Alt+Tab code only on the first press, and the hooks can attach only after that.
+[docs/internals.md](docs/internals.md) explains each hook and how the internals are found.
 
 ## Install
 
-Requires Windows 11 with the exact Explorer components it was built for (see
-[Compatibility](#compatibility)). No administrator rights.
+Requires Windows 11 (see [Compatibility](#compatibility)). No administrator rights.
 
 1. Download the zip from the [latest release](../../releases/latest) and unzip it.
 2. Double-click `instant-alt-tab.exe` and confirm. Or, from a terminal in that folder:
@@ -81,26 +81,24 @@ both act on the installed copy if there is one.
 
 ## Compatibility
 
-Explorer's internals change between Windows builds, so the hooks are tied to exact versions of two
-system files:
+Explorer's internals change with nearly every Windows update, so nothing about them is written into
+Instant Alt+Tab. Each time it starts, it works out what it needs from the exact Explorer files on
+your machine: one of the two DLLs involved by Microsoft's public symbol names, the other by what its
+code does ([details](docs/internals.md#finding-the-internals)). Updates that only move code around
+are handled without a new release.
 
-| File | Version |
-|---|---|
-| `twinui.pcshell.dll` | 10.0.26100.8524 |
-| `WindowsInternal.ComposableShell.Experiences.Switcher.dll` | 10.0.26100.8972 |
-
-These shipped with Windows 11 25H2 (build 26200.9168). On any other version Instant Alt+Tab does
-nothing: Alt+Tab stays stock and `hook.log` says why. Supporting a new build means re-deriving the
-offsets with [`tools/find_offsets.py`](tools/find_offsets.py); see
-[docs/internals.md](docs/internals.md#supporting-another-windows-build).
+If an update changes Alt+Tab in a way it doesn't recognize, it leaves Alt+Tab alone and shows a
+message once; `status` says why. It was developed and tested on Windows 11 25H2, and its
+discovery finds everything in three consecutive monthly builds of the two DLLs.
 
 ## Safety
 
-- **Nothing is hooked unless everything matches.** Both modules must be the exact versions above,
-  and every hooked function's first bytes must match.
+- **Nothing is hooked unless everything is found.** Every value must be found exactly once, the
+  hooked code in memory must be the code that was analysed, and the first Alt+Tab confirms the
+  object layout against what Windows actually passes around.
 - **It turns itself off when in doubt.** If Windows does anything unexpected (a failed call, a card
-  list that isn't the one the menu shows, an exception), it drops the kept menu and Alt+Tab stays
-  stock until Explorer restarts. `status` shows when that happened.
+  list that isn't the one the menu shows, an exception), it drops the kept menu, Alt+Tab stays
+  stock until Explorer restarts, and a message tells you. `status` shows it too.
 - **It stops for good after repeated crashes.** If Explorer crashes twice within an hour while the
   hooks are active, the agent stops loading them until you install again.
 - **`stop` and `uninstall` remove every hook from the running Explorer.** If a hooked call is still
@@ -108,6 +106,18 @@ offsets with [`tools/find_offsets.py`](tools/find_offsets.py); see
 
 Some antivirus software flags programs that load code into other processes. The full source is here
 if you want to check what it does or build it yourself.
+
+## Footprint
+
+- **Disk:** about 1.5 MB installed, plus a few KB of looked-up symbol names per Windows build.
+- **Network:** once per Windows update, the agent downloads twinui.pcshell.dll's public symbols
+  (about 30 MB) from Microsoft's symbol server, keeps a dozen names from it and deletes it. Nothing
+  else is downloaded or sent.
+- **Explorer:** keeps one Alt+Tab menu alive instead of building one per press; it is the same menu
+  Windows builds every time you press Alt+Tab. Over a 30-opening test with windows opening and
+  closing, Explorer's memory and handle count stayed flat.
+- **Background:** the agent sleeps until Explorer starts or exits. Working out the internals takes
+  about 0.2 s per Explorer start once the symbols are known.
 
 ## Building
 
@@ -121,12 +131,14 @@ cmake --build --preset release
 
 The three binaries end up in `build\bin\Release`. To try them without installing, run
 `instant-alt-tab start` there (with no installed copy, since commands prefer that one).
-MinHook is downloaded during configuration.
+MinHook and Zydis are downloaded during configuration. `--target discover` builds a tool that runs
+the discovery on any copies of the two DLLs ([docs](docs/internals.md#checking-a-windows-build)).
 
 ## Troubleshooting
 
-`instant-alt-tab status` shows the current state. The agent writes `agent.log` and the hooks write
-`hook.log` to the install folder; both record starts, stops, menu rebuilds and anything unexpected.
+`instant-alt-tab status` shows the current state, including why Alt+Tab is stock if it is. The
+agent writes `agent.log` and the hooks write `hook.log` to the install folder; both record starts,
+stops, menu rebuilds and anything unexpected.
 
 ## License
 

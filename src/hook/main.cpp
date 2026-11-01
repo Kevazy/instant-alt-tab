@@ -1,10 +1,10 @@
 // The hook DLL. The agent loads it into Explorer and calls Start on a remote
-// thread; Stop undoes everything so the agent can unload it again.
+// thread, passing what discovery found; Stop undoes everything so the agent
+// can unload it again.
 
 #include "card_list.h"
 #include "hooking.h"
 #include "kept_menu.h"
-#include "pins.h"
 #include "../shared/log.h"
 #include "../shared/protocol.h"
 
@@ -48,18 +48,18 @@ bool Shutdown() {
     return ReleaseHooks(uiThreadDone ? kDrainTimeoutMs : 0) && uiThreadDone;
 }
 
-DWORD StartHooks() {
-    auto twinui = FindPinnedModule(pins::kTwinui);
-    auto switcher = FindPinnedModule(pins::kSwitcher);
+DWORD StartHooks(const internals::Internals& found) {
+    auto twinui = FindModule(internals::kTwinuiDll, found.twinui.module);
+    auto switcher = FindModule(internals::kSwitcherDll, found.switcher.module);
     if (!twinui || !switcher) {
-        Log(L"not started: %s isn't the supported build (or isn't loaded)",
-            !twinui ? pins::kTwinui.name : pins::kSwitcher.name);
+        Log(L"not started: the loaded %s isn't the file the agent analysed",
+            !twinui ? internals::kTwinuiDll : internals::kSwitcherDll);
         return protocol::kUnsupportedBuild;
     }
     if (!InitializeHooks()) return protocol::kStartFailed;
-    if (!card_list::Install(*switcher) || !kept_menu::Install(*twinui, *switcher)) {
+    if (!card_list::Install(*switcher, found.switcher) || !kept_menu::Install(*twinui, *switcher, found)) {
         ReleaseHooks(0);  // nothing was enabled
-        Log(L"not started: a hooked function doesn't match the supported build, or creating a hook failed");
+        Log(L"not started: a function's code in memory isn't what the agent analysed, or creating a hook failed");
         return protocol::kUnsupportedBuild;
     }
     kept_menu::Enable();
@@ -74,10 +74,15 @@ DWORD StartHooks() {
 
 }  // namespace
 
-extern "C" __declspec(dllexport) DWORD WINAPI Start(void*) {
+// `parameter` points to the agent's internals::Internals, copied into Explorer.
+extern "C" __declspec(dllexport) DWORD WINAPI Start(void* parameter) {
     AcquireSRWLockExclusive(&g_lock);
     DWORD result;
-    if (g_running) {
+    auto found = static_cast<const internals::Internals*>(parameter);
+    if (!found || found->magic != internals::kMagic || found->version != internals::kVersion ||
+        found->size != sizeof(internals::Internals)) {
+        result = protocol::kStartFailed;  // an agent from another release
+    } else if (g_running) {
         result = protocol::kAlreadyRunning;
     } else if (g_shutDown) {
         result = protocol::kNeedsReload;
@@ -88,7 +93,7 @@ extern "C" __declspec(dllexport) DWORD WINAPI Start(void*) {
         if (!g_hookedMarker || GetLastError() == ERROR_ALREADY_EXISTS) {
             result = protocol::kAlreadyRunning;
         } else {
-            result = StartHooks();
+            result = StartHooks(*found);
         }
         if (result == protocol::kStarted) {
             g_running = true;

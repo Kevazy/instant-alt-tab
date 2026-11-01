@@ -19,6 +19,7 @@ constexpr size_t kMaxReplayCards = 2048;     // beyond this a single Reset is ch
 constexpr size_t kMaxPlausibleCards = 8192;  // far more windows than a session has: a bigger "vector" isn't one
 
 ModuleImage g_switcher;
+internals::Switcher g_found;  // what discovery found in it
 ListFn g_syncList, g_sortList;
 RemoveAtFn g_removeAt;
 InsertAtFn g_insertAt;
@@ -27,7 +28,7 @@ std::atomic<void*> g_quietVector{nullptr};
 thread_local void* t_lastSortedList = nullptr;
 thread_local unsigned t_sortCount = 0;
 
-BYTE& Observed(void* vector) { return *(static_cast<BYTE*>(vector) + pins::kVectorObserved); }
+BYTE& Observed(void* vector) { return *(static_cast<BYTE*>(vector) + g_found.vectorObserved); }
 
 // The cards in a vector at one moment, each with a reference held.
 class Snapshot {
@@ -150,23 +151,24 @@ void* __fastcall SortListHook(void* list, void* a, void* b, void* c) {
 
 }  // namespace
 
-bool Install(const ModuleImage& switcher) {
+bool Install(const ModuleImage& switcher, const internals::Switcher& found) {
     g_switcher = switcher;
-    if (!EntryMatches(switcher, pins::kVectorRemoveAt) || !EntryMatches(switcher, pins::kVectorInsertAt) ||
-        !EntryMatches(switcher, pins::kVectorNotify)) {
+    g_found = found;
+    if (!EntryMatches(switcher, found.vectorRemoveAt) || !EntryMatches(switcher, found.vectorInsertAt) ||
+        !EntryMatches(switcher, found.vectorNotify)) {
         return false;
     }
-    g_removeAt = switcher.At<RemoveAtFn>(pins::kVectorRemoveAt.rva);
-    g_insertAt = switcher.At<InsertAtFn>(pins::kVectorInsertAt.rva);
-    g_notify = switcher.At<NotifyFn>(pins::kVectorNotify.rva);
-    return CreateHook(switcher, pins::kSyncList, &SyncListHook, &g_syncList) &&
-           CreateHook(switcher, pins::kSortList, &SortListHook, &g_sortList);
+    g_removeAt = switcher.At<RemoveAtFn>(found.vectorRemoveAt.rva);
+    g_insertAt = switcher.At<InsertAtFn>(found.vectorInsertAt.rva);
+    g_notify = switcher.At<NotifyFn>(found.vectorNotify.rva);
+    return CreateHook(switcher, found.syncList, &SyncListHook, &g_syncList) &&
+           CreateHook(switcher, found.sortList, &SortListHook, &g_sortList);
 }
 
 void* CardVectorOf(void* list) {
-    void* vector = list ? ReadPointer(list, pins::kListCards) : nullptr;
+    void* vector = list ? ReadPointer(list, g_found.listCards) : nullptr;
     if (!vector || !g_switcher.Contains(ReadPointer(vector, 0))) return nullptr;  // vtable in the switcher
-    void* storage = ReadPointer(vector, pins::kVectorStorage);
+    void* storage = ReadPointer(vector, g_found.vectorStorage);
     auto begin = static_cast<BYTE*>(storage ? ReadPointer(storage, 0) : nullptr);
     auto end = static_cast<BYTE*>(storage ? ReadPointer(storage, sizeof(void*)) : nullptr);
     bool sane = begin && end >= begin && static_cast<size_t>(end - begin) <= kMaxPlausibleCards * sizeof(void*);
@@ -174,7 +176,7 @@ void* CardVectorOf(void* list) {
 }
 
 std::span<IInspectable* const> Cards(void* cardVector) {
-    auto storage = static_cast<IInspectable** const*>(ReadPointer(cardVector, pins::kVectorStorage));
+    auto storage = static_cast<IInspectable** const*>(ReadPointer(cardVector, g_found.vectorStorage));
     if (!storage || !storage[0]) return {};
     return {storage[0], storage[1]};
 }

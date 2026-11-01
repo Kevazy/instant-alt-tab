@@ -1,10 +1,11 @@
 #pragma once
 
-// Thin layer over MinHook: hooks are created only on pinned modules whose
-// function entry bytes match, and every hook body counts itself so the DLL can
-// wait for in-flight calls before it is unloaded.
+// Thin layer over MinHook: hooks are created only on functions whose entry
+// bytes are the ones discovery read from the module's file, and every hook
+// body counts itself so the DLL can wait for in-flight calls before it is
+// unloaded.
 
-#include "pins.h"
+#include "../shared/internals.h"
 
 #include <windows.h>
 
@@ -49,18 +50,30 @@ struct ModuleImage {
     }
 };
 
-// The loaded module, if it is exactly the pinned build.
-std::optional<ModuleImage> FindPinnedModule(const pins::Module& module);
+// The loaded module, if it is the file discovery analysed.
+std::optional<ModuleImage> FindModule(const wchar_t* name, const internals::Module& analysed);
 
-bool EntryMatches(const ModuleImage& module, const pins::Function& function);
+// Whether `address` is in an executable section of the module.
+bool IsCode(const ModuleImage& module, const void* address);
+
+// The function is code in the module and starts with the bytes discovery read from the file.
+bool EntryMatches(const ModuleImage& module, const internals::Function& function);
 
 // Creates a (disabled) hook after checking the entry bytes; `original` receives
 // the trampoline that calls the real function.
-bool CreateHook(const ModuleImage& module, const pins::Function& function, void* detour, void** original);
+bool CreateHook(const ModuleImage& module, const internals::Function& function, void* detour, void** original);
 
 template <typename Fn>
-bool CreateHook(const ModuleImage& module, const pins::Function& function, Fn detour, Fn* original) {
+bool CreateHook(const ModuleImage& module, const internals::Function& function, Fn detour, Fn* original) {
     return CreateHook(module, function, reinterpret_cast<void*>(detour), reinterpret_cast<void**>(original));
+}
+
+// Hooks and enables a function found at run time (in a live object's vtable).
+bool HookNow(void* target, void* detour, void** original);
+
+template <typename Fn>
+bool HookNow(void* target, Fn detour, Fn* original) {
+    return HookNow(target, reinterpret_cast<void*>(detour), reinterpret_cast<void**>(original));
 }
 
 bool InitializeHooks();

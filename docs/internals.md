@@ -1,8 +1,9 @@
 # How Instant Alt+Tab works
 
 This is the long version of the README's "How it works": what Windows does when Alt+Tab opens, what
-each hook changes, and how to support a new Windows build. All offsets mentioned here live in
-[`src/hook/pins.h`](../src/hook/pins.h).
+each hook changes, and how the hooks find what they need in whatever Windows build they run on. No
+address or offset is written down anywhere in the source; [Finding the internals](#finding-the-internals)
+explains where each one comes from.
 
 ## The pieces
 
@@ -13,8 +14,9 @@ each hook changes, and how to support a new Windows build. All offsets mentioned
 | `instant-alt-tab-hook.dll` | Explorer | the hooks |
 
 The agent finds the shell Explorer (`GetShellWindow`), waits until Explorer has loaded its Alt+Tab
-modules (they load on the first Alt+Tab), loads the DLL with `CreateRemoteThread` + `LoadLibraryW`,
-and calls its `Start` export. When Explorer exits it waits for the next one. `Stop` reverses
+modules (they load on the first Alt+Tab), works out from those DLL files what the hooks need
+(`src/discovery`), loads the DLL with `CreateRemoteThread` + `LoadLibraryW`, and calls its `Start`
+export with the results. When Explorer exits it waits for the next one. `Stop` reverses
 everything, and the agent unloads the DLL only once `Stop` has confirmed that no code in it can run
 anymore.
 
@@ -25,8 +27,8 @@ Two modules are involved:
 - **`twinui.pcshell.dll`** hosts the view. Each opening gets a new `XamlAltTabViewHost`, whose
   `Show(display, flags, view)`:
   1. builds the menu (`CreateAltTabControl`),
-  2. asks the data source for the foreground window's item (`CachedDataSource::GetItemForView`),
-  3. positions the selection,
+  2. asks the data source for the foreground window's item,
+  3. positions the selection through the control's `NavigateToItem` and `Navigate`,
   4. puts the control into the host window and registers its XAML root,
   5. displays it (`DisplayAltTab`).
 
@@ -62,9 +64,8 @@ isn't reused.
 
 ### Keeping the menu current
 
-When a card is chosen, the switcher "closes" the list (switcher `0x99018`). That sets a flag at
-`+0x12a`, which makes the list drop every data-source event, and unregisters the list's change
-handler from the data source. Stock Windows throws the list away right after, so this costs nothing.
+When a card is chosen, the switcher "closes" the list. That sets a flag in the list, which makes
+it drop every data-source event, and unregisters the list's change handler from the data source. Stock Windows throws the list away right after, so this costs nothing.
 A kept list that went through it would never hear of another window change. So the hook skips it for
 the kept list, which leaves the list exactly as it is after Esc. When the kept menu is dropped, the
 list is closed the stock way; otherwise the data source would keep it alive.
@@ -74,7 +75,7 @@ list is closed the stock way; otherwise the data source would keep it alive.
 The switcher edits the card vector one element at a time, and XAML rebuilds a card for every change
 notification it gets. A re-sync after one window opens moves about 85 cards; a sort makes about
 1,100 single-card replacements. The hooks on the list's re-sync and sort clear the vector's
-"observed" flag (`+0x70`; the notifier raises nothing while it is clear), let the switcher edit,
+"observed" flag (the notifier raises nothing while it is clear), let the switcher edit,
 then put the old contents back silently and replay only the longest-common-subsequence diff, with
 notifications on. XAML sees a consistent list after every step. If the replay doesn't reproduce the
 switcher's result, one `Reset` is sent instead.
@@ -86,11 +87,11 @@ reset or made irrelevant:
 
 - **Scroll position:** scrolled back to the top at dismissal.
 - **Selection:** `Show` positions the selection in one of three ways. With the foreground window's
-  item it focuses that card and moves forward, which is independent of history. For Alt+Shift+Tab
-  it only moves backward, and when the foreground window has no card (the taskbar, the desktop) it
-  only moves forward. Those two moves start from the control's current position, which is "none" in
-  a new control and wherever the last opening ended in a kept one. The `GetItemForView` hook knows
-  which branch `Show` takes, and puts the selection where a new control would end up: the last card
+  item it calls `NavigateToItem` and moves forward, which is independent of history. For
+  Alt+Shift+Tab it only moves backward, and when the foreground window has no card (the taskbar, the
+  desktop) it only moves forward. Those two moves start from the control's current position, which
+  is "none" in a new control and wherever the last opening ended in a kept one. The navigation hooks
+  see which call comes first and put the selection where a new control would end up: the last card
   for backward, the first card for the no-card case.
 - **Keyboard focus:** the control's navigation methods (`NavigateToItem` and `Navigate`, which Show
   and every Tab go through) focus cards "programmatically". XAML turns that into the input mode the
@@ -110,9 +111,12 @@ menu's cards are answered directly.
 
 ## Safety
 
-- **Exact build.** Both modules must match the pinned TimeDateStamp and SizeOfImage, and every
-  hooked function's first 16 bytes must match. Otherwise `Start` returns "unsupported build" and
-  nothing is hooked.
+- **Only what was analysed.** The loaded modules must be the files discovery analysed (same
+  TimeDateStamp and SizeOfImage), and every hooked function's first 16 bytes in memory must be the
+  ones read from the file. Otherwise `Start` refuses and nothing is hooked.
+- **Checked against Windows itself.** The first opening confirms the host's members: the control
+  the factory returns must be where discovery said the host keeps it, and the window Show puts it in
+  must be the host window member. A mismatch turns the hooks off.
 - **Fail closed.** Anything that contradicts what the hooks expect (`Show` failing or throwing, a
   failed layout, a card list that doesn't verify, an exception while tidying the hidden menu) drops
   the kept menu and turns retention off; Alt+Tab is stock until the hooks are started again, and
@@ -129,25 +133,66 @@ menu's cards are answered directly.
   active, the agent stops loading them until the next install. Normal restarts and sign-out don't
   count.
 
-## Supporting another Windows build
+## Finding the internals
 
-1. Run `python tools/find_offsets.py` (needs the Debugging Tools for Windows, part of the Windows
-   SDK). It finds twinui's functions by name from Microsoft's public symbols and the switcher's by
-   code structure, and prints them in the layout of `pins.h`.
-2. Replace the matching entries in `src/hook/pins.h`. These values aren't derived and should be
-   checked by hand:
-   - the host window's content getter/setter vtable slots (8 and 9);
-   - the card view model's `ISwitchItem` field (`+0xd8`);
-   - `kNavigateToItem` and `kNavigate`, the switcher functions at the control's vtable slots that
-     the script does print (`kNavigateToItemSlot`, `kNavigateSlot`);
-   - the interface IDs `kISwitchItem` and `kSearchedType`, which change only if the interfaces do.
-3. Build, run `instant-alt-tab start` from the build folder, and check `hook.log`. Uninstall any
-   installed copy first: the commands act on the installed copy when there is one.
-4. Check, at minimum:
-   - switching with Alt+Tab and Alt+Shift+Tab;
-   - Esc and reopening;
-   - opening, closing and closing-from-the-menu of windows, both while the menu is hidden and while
-     it is shown;
-   - Task View, then Alt+Tab;
-   - Alt+Tab with the taskbar focused;
-   - the speed, with `tools/measure_latency.cpp`.
+The hooks need about thirty facts about two DLLs: where some functions are, the layout of a few
+objects, and a few vtable slots. They change with nearly every monthly Windows update, so the agent
+works them out on the user's machine, from the exact files Explorer loaded, every time it starts
+the hooks (`src/discovery`). Each rule must match exactly once; if one doesn't, the hooks stay off
+and the user is told once, with a message window.
+
+**twinui.pcshell.dll** has public symbols. The first time the agent sees a build, it downloads the
+PDB from Microsoft's symbol server (about 30 MB), looks up a dozen names with the system's dbghelp,
+keeps just those addresses in a small file named after the PDB's signature, and deletes the PDB.
+From the named functions the rest follows by reading what their code does with their parameters:
+
+| Fact | Where it comes from |
+|---|---|
+| The view host's functions | their names (`XamlAltTabViewHost::Show` and so on) |
+| The host's window member | the address Show passes to the window content setter |
+| The host's control member | what Show calls the control's `NavigateToItem` and `Navigate` on |
+| The host's data source member | the address the factory passes to `to_cx<ISwitchItemDataSource>` |
+| The control's `NavigateToItem` and `Navigate` slots | the vtable slots twinui's named wrappers call |
+| The window content setter slot, and the getter's | the slot the named setter calls; WinRT puts a property's getter right before its setter |
+| The one real `RegisterXamlRoot` call | the only call to it in Show (the function is shared with unrelated folded code) |
+| `ISwitchItem`'s interface ID | the named `guid_v<ISwitchItem>` constant |
+
+**The switcher DLL** has no public symbols. Its functions are found by what they do, with the
+instructions decoded (Zydis) and the registers followed, so recompiles that only change instruction
+encodings, register use or prologues still match:
+
+| Fact | Where it comes from |
+|---|---|
+| The card vector's change notifier, and its "observed" flag | a function that first tests a byte member of its parameter, and is called with `CollectionChange.ItemInserted` by one function and `ItemRemoved` by another |
+| The vector's `InsertAt` and `RemoveAt` | those two callers |
+| The list's re-sync, and the list's card vector member | the one function calling both on the same member of its parameter |
+| The list's sort | the virtual method the re-sync calls on the list itself that reads that member |
+| The vector's storage | the member `RemoveAt` reads as a begin/end pair |
+| The list's close, and its closed flag | a two-instruction function that sets a byte member to 1 and jumps to a function that checks the list's subscription |
+| The descendant search | the recursive function that references the searched element type's interface ID |
+| The control's `NavigateToItem` and `Navigate` | read from the first built control's vtable, and hooked then |
+| Where a card keeps its `ISwitchItem` | the one card holding the item Show navigates to, checked again at every reused opening |
+
+Interface IDs are the one kind of constant in the source: COM never changes an interface's ID; a
+changed interface gets a new one.
+
+### Checking a Windows build
+
+`discover.exe` (built with `cmake --build --preset release --target discover`) runs the same
+discovery on any copies of the two DLLs and prints the results. Windows keeps the previous and the
+next pending versions of system files under `C:\Windows\WinSxS`, so new rules can be checked against
+several builds without touching Explorer:
+
+```
+discover --twinui <path>\twinui.pcshell.dll --switcher <path>\WindowsInternal.ComposableShell.Experiences.Switcher.dll
+```
+
+On a build where it works, check at minimum:
+
+- switching with Alt+Tab and Alt+Shift+Tab;
+- Esc and reopening;
+- opening, closing and closing-from-the-menu of windows, both while the menu is hidden and while
+  it is shown;
+- Task View, then Alt+Tab;
+- Alt+Tab with the taskbar focused;
+- the speed, with `tools/measure_latency.cpp`.

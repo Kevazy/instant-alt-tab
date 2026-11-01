@@ -7,6 +7,7 @@
 #include "../agent/crash_guard.h"
 #include "../agent/explorer.h"
 #include "../shared/protocol.h"
+#include "../shared/text_file.h"
 
 #include <windows.h>
 
@@ -50,6 +51,9 @@ bool PrintStatus() {
     Print(L"Alt+Tab:            %s", altTab);
     if (install::IsInstalled() && install::Disabled()) {
         Print(L"Turned off after Explorer crashed twice within an hour; install again to turn it back on.");
+    }
+    if (std::wstring problem = ReadTextFile(ActiveDirectory() + protocol::kProblemFile); !problem.empty()) {
+        Print(L"Not active for this version of Windows: %s", problem.c_str());
     }
     return true;
 }

@@ -15,6 +15,9 @@ inline constexpr wchar_t kHookDll[] = L"instant-alt-tab-hook.dll";
 inline constexpr wchar_t kAgentMutex[] = L"Local\\InstantAltTab-Agent";
 inline constexpr wchar_t kAgentStopEvent[] = L"Local\\InstantAltTab-AgentStop";
 
+// Written by the agent next to itself when Alt+Tab stays stock: the reason, for `status`.
+inline constexpr wchar_t kProblemFile[] = L"problem.txt";
+
 // Exports of the hook DLL, called in Explorer on a remote thread: DWORD WINAPI f(void*).
 inline constexpr char kStartExport[] = "Start";
 inline constexpr char kStopExport[] = "Stop";
@@ -41,6 +44,12 @@ inline std::wstring HookedMarkerName(DWORD explorerPid) {
 // Exists while that copy keeps the menu; it goes away when the hooks turn themselves off.
 inline std::wstring ActiveMarkerName(DWORD explorerPid) {
     return L"Local\\InstantAltTab-Active-" + std::to_wstring(explorerPid);
+}
+
+// Set when the hooks turn themselves off because something unexpected happened
+// (not on a stop), so the agent can tell the user.
+inline std::wstring TurnedOffEventName(DWORD explorerPid) {
+    return L"Local\\InstantAltTab-TurnedOff-" + std::to_wstring(explorerPid);
 }
 
 }  // namespace protocol

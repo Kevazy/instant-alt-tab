@@ -15,7 +15,7 @@
 
 namespace card_list {
 
-bool Install(const ModuleImage& switcher);
+bool Install(const ModuleImage& switcher, const internals::Switcher& found);
 
 // The card vector of a list view model, if it looks valid.
 void* CardVectorOf(void* list);

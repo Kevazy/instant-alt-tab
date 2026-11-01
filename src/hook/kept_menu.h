@@ -10,7 +10,7 @@
 
 namespace kept_menu {
 
-bool Install(const ModuleImage& twinui, const ModuleImage& switcher);
+bool Install(const ModuleImage& twinui, const ModuleImage& switcher, const internals::Internals& found);
 void Enable();
 
 // Drops the kept menu on Explorer's UI thread and stops keeping one. Returns

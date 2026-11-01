@@ -3,6 +3,8 @@
 // The shell's Explorer process: finding it, waiting until its Alt+Tab modules
 // are loaded, and loading, starting, stopping and unloading the hook DLL in it.
 
+#include "../shared/internals.h"
+
 #include <windows.h>
 
 #include <optional>
@@ -26,6 +28,9 @@ public:
 
     // twinui and the switcher are loaded once Alt+Tab is first used.
     bool HasAltTabModules() const;
+    // The file a module (by name) was loaded from, and the identity of the loaded image.
+    std::wstring ModulePath(const wchar_t* name) const;
+    std::optional<internals::Module> LoadedImage(const wchar_t* name) const;
     // Whether some copy of the hook DLL is started, and whether it still keeps
     // the menu (it turns itself off if something unexpected happens).
     bool IsHooked() const;
@@ -38,16 +43,19 @@ public:
     // in time. Its code may then still be running, so nothing is freed or
     // unloaded and that copy must be left alone until Explorer exits.
 
-    // Loads the DLL and calls Start; unloads it again unless it started. Call it
-    // only when no copy is hooked, so loads and unloads stay paired.
-    std::optional<DWORD> LoadAndStart(const std::wstring& dllPath);
+    // Loads the DLL and calls Start with what discovery found; unloads it again
+    // unless it started. Call it only when no copy is hooked, so loads and
+    // unloads stay paired.
+    std::optional<DWORD> LoadAndStart(const std::wstring& dllPath, const internals::Internals& found);
     // Calls Stop, then unloads the DLL unless it pinned itself.
     std::optional<DWORD> StopAndUnload(const std::wstring& dllPath);
 
 private:
     std::vector<HMODULE> Modules() const;
     HMODULE FindModule(const std::wstring& path) const;
-    std::optional<DWORD> CallExport(HMODULE module, const std::wstring& dllPath, const char* name);
+    HMODULE FindModuleByName(const wchar_t* name) const;
+    std::optional<DWORD> CallExport(HMODULE module, const std::wstring& dllPath, const char* name,
+                                    void* parameter = nullptr);
     std::optional<DWORD> RunRemoteThread(void* start, void* parameter);
     void Unload(HMODULE module);
 

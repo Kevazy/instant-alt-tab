@@ -10,8 +10,6 @@ namespace {
 
 // Stop can take up to ~15 s by itself (it waits for Explorer's UI thread and for hooked calls).
 constexpr DWORD kRemoteCallTimeoutMs = 30000;
-constexpr wchar_t kTwinui[] = L"twinui.pcshell.dll";
-constexpr wchar_t kSwitcher[] = L"WindowsInternal.ComposableShell.Experiences.Switcher.dll";
 
 void* Kernel32Function(const char* name) {
     return reinterpret_cast<void*>(GetProcAddress(GetModuleHandleW(L"kernel32.dll"), name));
@@ -59,14 +57,24 @@ DWORD Explorer::ExitCode() const {
 }
 
 bool Explorer::HasAltTabModules() const {
-    bool twinui = false, switcher = false;
-    for (HMODULE module : Modules()) {
-        wchar_t name[MAX_PATH];
-        if (!GetModuleBaseNameW(process_, module, name, MAX_PATH)) continue;
-        twinui |= _wcsicmp(name, kTwinui) == 0;
-        switcher |= _wcsicmp(name, kSwitcher) == 0;
+    return FindModuleByName(internals::kTwinuiDll) && FindModuleByName(internals::kSwitcherDll);
+}
+
+std::wstring Explorer::ModulePath(const wchar_t* name) const {
+    wchar_t path[MAX_PATH];
+    HMODULE module = FindModuleByName(name);
+    return module && GetModuleFileNameExW(process_, module, path, MAX_PATH) ? path : L"";
+}
+
+std::optional<internals::Module> Explorer::LoadedImage(const wchar_t* name) const {
+    auto base = reinterpret_cast<BYTE*>(FindModuleByName(name));
+    IMAGE_DOS_HEADER dos;
+    IMAGE_NT_HEADERS64 nt;
+    if (!base || !ReadProcessMemory(process_, base, &dos, sizeof(dos), nullptr) ||
+        !ReadProcessMemory(process_, base + dos.e_lfanew, &nt, sizeof(nt), nullptr)) {
+        return std::nullopt;
     }
-    return twinui && switcher;
+    return internals::Module{nt.FileHeader.TimeDateStamp, nt.OptionalHeader.SizeOfImage};
 }
 
 static bool MarkerExists(const std::wstring& name) {
@@ -81,7 +89,7 @@ bool Explorer::IsActive() const { return MarkerExists(protocol::ActiveMarkerName
 
 bool Explorer::HasLoaded(const std::wstring& dllPath) const { return FindModule(dllPath) != nullptr; }
 
-std::optional<DWORD> Explorer::LoadAndStart(const std::wstring& dllPath) {
+std::optional<DWORD> Explorer::LoadAndStart(const std::wstring& dllPath, const internals::Internals& found) {
     size_t bytes = (dllPath.size() + 1) * sizeof(wchar_t);
     void* remotePath = VirtualAllocEx(process_, nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remotePath) return 0;
@@ -95,8 +103,16 @@ std::optional<DWORD> Explorer::LoadAndStart(const std::wstring& dllPath) {
 
     HMODULE module = FindModule(dllPath);
     if (!module) return 0;
-    std::optional<DWORD> result = CallExport(module, dllPath, protocol::kStartExport);
-    if (result && *result != protocol::kStarted) Unload(module);
+    void* remoteFound = VirtualAllocEx(process_, nullptr, sizeof(found), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    if (!remoteFound || !WriteProcessMemory(process_, remoteFound, &found, sizeof(found), nullptr)) {
+        if (remoteFound) VirtualFreeEx(process_, remoteFound, 0, MEM_RELEASE);
+        Unload(module);
+        return 0;
+    }
+    std::optional<DWORD> result = CallExport(module, dllPath, protocol::kStartExport, remoteFound);
+    if (!result) return result;  // Start may still read it: keep the copy
+    VirtualFreeEx(process_, remoteFound, 0, MEM_RELEASE);
+    if (*result != protocol::kStarted) Unload(module);
     return result;
 }
 
@@ -122,6 +138,14 @@ std::vector<HMODULE> Explorer::Modules() const {
     }
 }
 
+HMODULE Explorer::FindModuleByName(const wchar_t* name) const {
+    for (HMODULE module : Modules()) {
+        wchar_t baseName[MAX_PATH];
+        if (GetModuleBaseNameW(process_, module, baseName, MAX_PATH) && _wcsicmp(baseName, name) == 0) return module;
+    }
+    return nullptr;
+}
+
 HMODULE Explorer::FindModule(const std::wstring& path) const {
     for (HMODULE module : Modules()) {
         wchar_t name[MAX_PATH];
@@ -130,10 +154,11 @@ HMODULE Explorer::FindModule(const std::wstring& path) const {
     return nullptr;
 }
 
-std::optional<DWORD> Explorer::CallExport(HMODULE module, const std::wstring& dllPath, const char* name) {
+std::optional<DWORD> Explorer::CallExport(HMODULE module, const std::wstring& dllPath, const char* name,
+                                          void* parameter) {
     DWORD offset = ExportOffset(dllPath, name);
     if (!offset) return 0;
-    return RunRemoteThread(reinterpret_cast<BYTE*>(module) + offset, nullptr);
+    return RunRemoteThread(reinterpret_cast<BYTE*>(module) + offset, parameter);
 }
 
 std::optional<DWORD> Explorer::RunRemoteThread(void* start, void* parameter) {
