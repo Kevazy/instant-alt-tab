@@ -98,7 +98,10 @@ std::vector<const void*> ItemVtables() {
     std::vector<const void*> vtables;
     if (!g_dataModelInternals.itemVtables[0]) return vtables;
     auto module = FindModule(AltTab::kDataModelDll, g_dataModelInternals.module);
-    if (!module) return vtables;
+    if (!module) {
+        Log(L"%s isn't loaded, or isn't the file discovery analysed; card layout learned later", AltTab::kDataModelDll);
+        return vtables;
+    }
     for (uint32_t rva : g_dataModelInternals.itemVtables) {
         if (!rva) continue;
         const BYTE* vtable = module->base + rva;
@@ -116,8 +119,16 @@ bool PlausibleObject(const void* value) {
         GetSystemInfo(&i);
         return i;
     }();
-    return value >= info.lpMinimumApplicationAddress && value <= info.lpMaximumApplicationAddress &&
-           reinterpret_cast<uintptr_t>(value) % alignof(void*) == 0;
+    if (value < info.lpMinimumApplicationAddress || value > info.lpMaximumApplicationAddress ||
+        reinterpret_cast<uintptr_t>(value) % alignof(void*) != 0) {
+        return false;
+    }
+    // Committed and readable, and not a guard page (reading one would use up a thread's stack guard).
+    MEMORY_BASIC_INFORMATION memory;
+    constexpr DWORD kReadable = PAGE_READONLY | PAGE_READWRITE | PAGE_WRITECOPY | PAGE_EXECUTE_READ |
+                                PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    return VirtualQuery(value, &memory, sizeof(memory)) && memory.State == MEM_COMMIT && (memory.Protect & kReadable) &&
+           !(memory.Protect & PAGE_GUARD);
 }
 
 bool IsKeptControl(IUnknown* control) {
@@ -180,20 +191,18 @@ void LearnCardItemOffsetFromItemClass() {
                 break;
             }
         }
+        // Each must be its own ISwitchItem interface, the pointer Show navigates to.
+        for (size_t i = 0; everyCard && i < cards.size(); ++i) {
+            auto object = static_cast<IUnknown*>(ReadPointer(cards[i], offset));
+            com_ptr<IUnknown> item;
+            object->QueryInterface(g_twinuiInternals.switchItem, item.put_void());
+            everyCard = item.get() == object;
+        }
         if (everyCard) offsets.push_back(offset);
     }
     if (offsets.size() != 1) {
         Log(L"couldn't tell where cards keep their item from its class (%zu offsets fit)", offsets.size());
         return;
-    }
-    for (IInspectable* card : cards) {
-        auto object = static_cast<IUnknown*>(ReadPointer(card, offsets.front()));
-        com_ptr<IUnknown> item;
-        object->QueryInterface(g_twinuiInternals.switchItem, item.put_void());
-        if (item.get() != object) {
-            Log(L"the item-class objects cards hold aren't their ISwitchItem; card layout not learned");
-            return;
-        }
     }
     g_cardItemOffset = offsets.front();
     g_cardItemOffsetConfirmed = false;

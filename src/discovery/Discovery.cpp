@@ -42,8 +42,13 @@ Result Discover(const DllPaths& dlls, const std::wstring& cacheDirectory, HANDLE
     }
     found.twinui.module = {twinui->TimeDateStamp(), twinui->SizeOfImage()};
     found.switcher.module = {switcher->TimeDateStamp(), switcher->SizeOfImage()};
-    if (auto dataModel = dlls.dataModel.empty() ? std::nullopt : PeFile::Load(dlls.dataModel)) {
-        FindDataModelInternals(*dataModel, cacheDirectory, cancel, found.dataModel);
+    if (dlls.dataModel.empty()) {
+        result.dataModelError = L"not looked for";
+    } else if (auto dataModel = PeFile::Load(dlls.dataModel)) {
+        result.dataModelError =
+            FindDataModelInternals(*dataModel, cacheDirectory, cancel, found.dataModel, result.dataModelDownloadFailed);
+    } else {
+        result.dataModelError = L"couldn't read " + dlls.dataModel;
     }
     result.internals = found;
     return result;

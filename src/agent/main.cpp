@@ -20,6 +20,7 @@
 
 #include <algorithm>
 #include <memory>
+#include <set>
 #include <sstream>
 #include <string>
 #include <thread>
@@ -49,15 +50,12 @@ WakeReason WaitFor(HANDLE stop, HANDLE explorer, DWORD timeoutMs, HANDLE turnedO
     }
 }
 
-// Waits `ms` of wall-clock time: a wait's timeout doesn't count time the PC
-// sleeps, so a long one is made of pieces of at most an hour.
-WakeReason WaitWallClock(HANDLE stop, HANDLE explorer, ULONGLONG ms) {
-    auto now = [] {
-        FILETIME time;
-        GetSystemTimeAsFileTime(&time);
-        return (static_cast<ULONGLONG>(time.dwHighDateTime) << 32 | time.dwLowDateTime) / 10000;
-    };
-    for (ULONGLONG until = now() + ms, current = now(); current < until; current = now()) {
+// Waits `ms` including time the PC sleeps, which a wait's timeout doesn't count:
+// a long wait is made of pieces of at most an hour, measured with the tick
+// count, which does count sleep and isn't moved by clock changes.
+WakeReason WaitCountingSleep(HANDLE stop, HANDLE explorer, ULONGLONG ms) {
+    for (ULONGLONG until = GetTickCount64() + ms, current = GetTickCount64(); current < until;
+         current = GetTickCount64()) {
         WakeReason wake =
             WaitFor(stop, explorer, static_cast<DWORD>(std::min<ULONGLONG>(until - current, kLongWaitStepMs)));
         if (wake != WakeReason::Timeout) return wake;
@@ -96,8 +94,8 @@ constexpr wchar_t kUnpublishedMessage[] =
     L"available.";
 constexpr wchar_t kOfflineMessage[] =
     L"Alt+Tab is at normal speed for now: after a Windows update, Instant Alt+Tab downloads a file from "
-    L"Microsoft's symbol server once, and it couldn't reach it. It keeps trying, and speeds Alt+Tab up as soon "
-    L"as it gets through.";
+    L"Microsoft's symbol server once, and that hasn't worked yet (see \"instant-alt-tab status\"). It keeps "
+    L"trying, and speeds Alt+Tab up as soon as it succeeds.";
 constexpr wchar_t kTurnedOffMessage[] =
     L"Instant Alt+Tab turned itself off: something in Explorer didn't behave as expected. Alt+Tab is back to normal "
     L"speed until Explorer restarts.\n\nDetails are in hook.log.";
@@ -158,9 +156,13 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
         Log(L"Explorer %lu: its Alt+Tab DLLs couldn't be read; it's probably exiting", explorer.Pid());
         return std::nullopt;
     }
-    // Optional: the class of the shell's items, from the DLL that implements them.
+    // Optional: the class of the shell's items, from the DLL that implements them. A
+    // file whose symbols couldn't be downloaded isn't tried again while the agent
+    // runs, so a network without the symbol server doesn't delay every Explorer start.
+    static std::set<std::wstring> dataModelsWithoutSymbols;
     std::wstring dataModel = explorer.ModulePath(AltTab::kDataModelDll);
     if (dataModel.empty()) dataModel = RegisteredDllPath(AltTab::kDataModelDll);
+    if (dataModelsWithoutSymbols.contains(dataModel)) dataModel.clear();
     int failedDownloads = 0;
     for (DWORD retryMs = kDownloadRetryFirstMs;; retryMs = std::min(retryMs * 2, kDownloadRetryMaxMs)) {
         ULONGLONG started = GetTickCount64();
@@ -178,9 +180,10 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
         if (result->internals) {
             Log(L"Explorer %lu: found the Alt+Tab internals in %llu ms", explorer.Pid(), GetTickCount64() - started);
             if (!result->internals->dataModel.itemVtables[0]) {
-                Log(L"Explorer %lu: %s's item class wasn't found, so the second Alt+Tab after Explorer starts may "
+                Log(L"Explorer %lu: %s's item class wasn't found (%s), so the second Alt+Tab after Explorer starts may "
                     L"rebuild the menu once",
-                    explorer.Pid(), AltTab::kDataModelDll);
+                    explorer.Pid(), AltTab::kDataModelDll, result->dataModelError.c_str());
+                if (result->dataModelDownloadFailed) dataModelsWithoutSymbols.insert(dataModel);
             }
             return result->internals;
         }
@@ -200,7 +203,7 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
         WriteTextFile(directory + SharedNames::kProblemFile,
                       L"waiting to download Windows' public symbols: " + result->error);
         Log(L"Explorer %lu: %s; trying again in %lu minutes", explorer.Pid(), result->error.c_str(), waitMs / 60000);
-        wake = result->notPublished ? WaitWallClock(stop, explorer.Handle(), waitMs)
+        wake = result->notPublished ? WaitCountingSleep(stop, explorer.Handle(), waitMs)
                                     : WaitFor(stop, explorer.Handle(), waitMs);
         if (wake != WakeReason::Timeout) return std::nullopt;
     }

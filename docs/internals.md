@@ -257,7 +257,7 @@ encodings, register use or prologues still match:
 | The list's close, and its closed flag | a two-instruction function that sets a byte member to 1 and jumps to a function that checks the list's subscription |
 | The descendant search | the recursive function that references the searched element type's interface ID |
 | The control's `NavigateToItem` and `Navigate` | read from the first built control's vtable, and hooked once Show is seen storing exactly that pointer in the host |
-| Where a card keeps its `ISwitchItem` | the one card holding the item Show navigates to; or, when Show selects no window (the first opening after Explorer starts, before Windows' window list is filled), the one offset at which every card holds a different item object, recognized by its class's vtable (below). Checked again at every reused opening |
+| Where a card keeps its `ISwitchItem` | the one card holding the item Show navigates to; or, when Show selects no window (the first opening after Explorer starts, before Windows' window list is filled), the one offset at which every card holds a different item object, recognized by its class's vtable (below). Checked again at every opening that navigates to an item |
 
 **SwitcherDataModel.dll** implements the items behind the cards (the class `RootSwitchItem`). Its
 small PDB (under 1 MB) gives the vtables of that class, by the name `RootSwitchItem::vftable`. They

@@ -86,11 +86,14 @@ std::wstring Download(const std::wstring& path, const std::wstring& to, HANDLE c
                                                                   WINHTTP_FLAG_SECURE)
                                              : nullptr};
     // Name resolution, connecting and sending may each take 10 s, and a stalled read 30 s.
-    if (session.handle) WinHttpSetTimeouts(session.handle, 10000, 10000, 10000, 30000);
+    if (request.handle) WinHttpSetTimeouts(request.handle, 10000, 10000, 10000, 30000);
+    auto cancelled = [&] { return cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0; };
+    if (cancelled()) return L"stopped";
     if (!request.handle || !WinHttpSendRequest(request.handle, WINHTTP_NO_ADDITIONAL_HEADERS, 0, nullptr, 0, 0, 0) ||
         !WinHttpReceiveResponse(request.handle, nullptr)) {
         return L"couldn't reach the symbol server (error " + std::to_wstring(GetLastError()) + L")";
     }
+    if (cancelled()) return L"stopped";
     DWORD size = sizeof(status);
     WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &status, &size,
                         nullptr);
@@ -104,7 +107,7 @@ std::wstring Download(const std::wstring& path, const std::wstring& to, HANDLE c
             return L"the download broke off (error " + std::to_wstring(GetLastError()) + L")";
         }
         if (read == 0) break;
-        if (cancel && WaitForSingleObject(cancel, 0) == WAIT_OBJECT_0) return L"stopped";
+        if (cancelled()) return L"stopped";
         if (total + read > kMaxPdbBytes || !file.write(buffer.data(), read)) return L"couldn't save the download";
     }
     return {};

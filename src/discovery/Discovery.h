@@ -22,9 +22,11 @@ struct DllPaths {
 
 struct Result {
     std::optional<AltTab::Internals> internals;
-    std::wstring error;         // what didn't match, when internals is empty
-    bool retryLater = false;    // the symbol download failed; the same files may work later
-    bool notPublished = false;  // because Microsoft hasn't published the symbols (yet)
+    std::wstring error;                    // what didn't match, when internals is empty
+    bool retryLater = false;               // the symbol download failed; the same files may work later
+    bool notPublished = false;             // because Microsoft hasn't published the symbols (yet)
+    std::wstring dataModelError;           // why the optional data model values are missing, if they are
+    bool dataModelDownloadFailed = false;  // because their symbol download failed
 };
 
 // `cacheDirectory` (with a trailing backslash) keeps the looked-up symbol names.
