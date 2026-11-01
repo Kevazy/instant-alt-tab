@@ -56,9 +56,7 @@ DWORD Explorer::ExitCode() const {
     return code;
 }
 
-bool Explorer::HasAltTabModules() const {
-    return FindModuleByName(internals::kTwinuiDll) && FindModuleByName(internals::kSwitcherDll);
-}
+bool Explorer::HasModule(const wchar_t* name) const { return FindModuleByName(name) != nullptr; }
 
 std::wstring Explorer::ModulePath(const wchar_t* name) const {
     wchar_t path[MAX_PATH];
@@ -89,19 +87,24 @@ bool Explorer::IsActive() const { return MarkerExists(protocol::ActiveMarkerName
 
 bool Explorer::HasLoaded(const std::wstring& dllPath) const { return FindModule(dllPath) != nullptr; }
 
-std::optional<DWORD> Explorer::LoadAndStart(const std::wstring& dllPath, const internals::Internals& found) {
+std::optional<bool> Explorer::Load(const std::wstring& dllPath) {
     size_t bytes = (dllPath.size() + 1) * sizeof(wchar_t);
     void* remotePath = VirtualAllocEx(process_, nullptr, bytes, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    if (!remotePath) return 0;
+    if (!remotePath) return false;
     if (!WriteProcessMemory(process_, remotePath, dllPath.c_str(), bytes, nullptr)) {
         VirtualFreeEx(process_, remotePath, 0, MEM_RELEASE);
-        return 0;
+        return false;
     }
     // If LoadLibraryW doesn't return in time it may still read the path: keep the buffer.
     if (!RunRemoteThread(Kernel32Function("LoadLibraryW"), remotePath)) return std::nullopt;
     VirtualFreeEx(process_, remotePath, 0, MEM_RELEASE);
+    return FindModule(dllPath) != nullptr;
+}
 
-    HMODULE module = FindModule(dllPath);
+std::optional<DWORD> Explorer::LoadAndStart(const std::wstring& dllPath, const internals::Internals& found) {
+    std::optional<bool> loaded = Load(dllPath);
+    if (!loaded) return std::nullopt;
+    HMODULE module = *loaded ? FindModule(dllPath) : nullptr;
     if (!module) return 0;
     void* remoteFound = VirtualAllocEx(process_, nullptr, sizeof(found), MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
     if (!remoteFound || !WriteProcessMemory(process_, remoteFound, &found, sizeof(found), nullptr)) {

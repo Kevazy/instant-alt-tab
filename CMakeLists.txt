@@ -60,7 +60,7 @@ add_library(agent_core STATIC
 set_project_warnings(agent_core)
 
 # Runs in the background from sign-in; no window.
-add_executable(agent WIN32 src/agent/main.cpp src/agent/notification.cpp)
+add_executable(agent WIN32 src/agent/main.cpp src/agent/ComponentRegistration.cpp src/agent/notification.cpp)
 set_target_properties(agent PROPERTIES OUTPUT_NAME instant-alt-tab-agent)
 set_project_warnings(agent)
 target_link_libraries(agent PRIVATE agent_core discovery shared)

@@ -1,13 +1,16 @@
 // instant-alt-tab-agent.exe: runs in the background (started at sign-in) and
-// keeps the hooks active in whichever Explorer is the shell. It waits for
-// Explorer's Alt+Tab code to load, works out what the hooks need from those
-// DLLs (src/discovery), starts the hooks, and starts them again after Explorer
-// restarts. Windowless; logs to agent.log next to itself.
+// keeps the hooks active in whichever Explorer is the shell. Once Explorer has
+// started, it works out what the hooks need from its Alt+Tab DLLs
+// (src/discovery), loads the one Explorer loads only on the first Alt+Tab,
+// starts the hooks, and starts them again after Explorer restarts. Windowless;
+// logs to agent.log next to itself.
 
+#include "ComponentRegistration.h"
 #include "crash_guard.h"
 #include "explorer.h"
 #include "notification.h"
 #include "../discovery/discovery.h"
+#include "../discovery/pe_file.h"
 #include "../shared/log.h"
 #include "../shared/protocol.h"
 #include "../shared/text_file.h"
@@ -24,7 +27,7 @@
 namespace {
 
 constexpr DWORD kPollMs = 2000;
-constexpr DWORD kSettleMs = 1500;              // lets the Alt+Tab opening that loaded the modules finish first
+constexpr DWORD kSettleMs = 1500;              // lets the Alt+Tab opening that loaded the switcher finish first
 constexpr DWORD kFirstRetryMs = 60 * 1000;     // a failed symbol download is tried again after a minute,
 constexpr DWORD kMaxRetryMs = 60 * 60 * 1000;  // then less often, up to hourly
 
@@ -75,12 +78,18 @@ constexpr wchar_t kTurnedOffMessage[] =
     L"Instant Alt+Tab turned itself off: something in Explorer didn't behave as expected. Alt+Tab is back to normal "
     L"speed until Explorer restarts.\n\nDetails are in hook.log.";
 
-// The builds of the two DLLs Explorer loaded.
-std::wstring Builds(const Explorer& explorer) {
+// The builds of the two DLLs Explorer loaded, or of the switcher's file while
+// it isn't loaded yet.
+std::wstring Builds(const Explorer& explorer, const std::wstring& switcherPath) {
     auto twinui = explorer.LoadedImage(internals::kTwinuiDll);
-    auto switcher = explorer.LoadedImage(internals::kSwitcherDll);
+    uint32_t switcher = 0;
+    if (auto image = explorer.LoadedImage(internals::kSwitcherDll)) {
+        switcher = image->timeDateStamp;
+    } else if (auto file = discovery::PeFile::Load(switcherPath)) {
+        switcher = file->TimeDateStamp();
+    }
     wchar_t builds[32];
-    swprintf_s(builds, L"%08x-%08x", twinui ? twinui->timeDateStamp : 0, switcher ? switcher->timeDateStamp : 0);
+    swprintf_s(builds, L"%08x-%08x", twinui ? twinui->timeDateStamp : 0, switcher);
     return builds;
 }
 
@@ -127,16 +136,15 @@ std::optional<discovery::Result> DiscoverInBackground(const std::wstring& twinui
     return std::nullopt;
 }
 
-// Works out what the hooks need from the DLLs this Explorer loaded. Retries
-// while the symbol download fails; returns nothing when the hooks must stay
-// off for this Explorer, or when `wake` says the wait was interrupted.
-std::optional<internals::Internals> Discover(Explorer& explorer, HANDLE stop, const std::wstring& directory,
-                                             const std::wstring& builds, Wake& wake) {
+// Works out what the hooks need from the DLLs this Explorer loaded, or will
+// load: `switcher` may not be loaded yet. Retries while the symbol download
+// fails; returns nothing when the hooks must stay off for this Explorer, or
+// when `wake` says the wait was interrupted.
+std::optional<internals::Internals> Discover(Explorer& explorer, const std::wstring& switcher, HANDLE stop,
+                                             const std::wstring& directory, Wake& wake) {
     std::wstring twinui = explorer.ModulePath(internals::kTwinuiDll);
-    std::wstring switcher = explorer.ModulePath(internals::kSwitcherDll);
     auto twinuiImage = explorer.LoadedImage(internals::kTwinuiDll);
-    auto switcherImage = explorer.LoadedImage(internals::kSwitcherDll);
-    if (twinui.empty() || switcher.empty() || !twinuiImage || !switcherImage) {
+    if (twinui.empty() || !twinuiImage) {
         Log(L"Explorer %lu: its Alt+Tab DLLs couldn't be read; it's probably exiting", explorer.Pid());
         return std::nullopt;
     }
@@ -145,8 +153,9 @@ std::optional<internals::Internals> Discover(Explorer& explorer, HANDLE stop, co
         std::optional<discovery::Result> result =
             DiscoverInBackground(twinui, switcher, directory + L"symbols\\", stop, explorer.Handle(), wake);
         if (!result) return std::nullopt;
+        auto switcherImage = explorer.LoadedImage(internals::kSwitcherDll);
         if (result->internals && (result->internals->twinui.module != *twinuiImage ||
-                                  result->internals->switcher.module != *switcherImage)) {
+                                  (switcherImage && result->internals->switcher.module != *switcherImage))) {
             // Rare: the files were replaced while Explorer kept the old ones loaded.
             Log(L"Explorer %lu: the Alt+Tab DLLs on disk aren't the ones it loaded; waiting for it to restart",
                 explorer.Pid());
@@ -159,7 +168,7 @@ std::optional<internals::Internals> Discover(Explorer& explorer, HANDLE stop, co
         if (!result->retryLater) {
             Log(L"Explorer %lu: Alt+Tab stays stock: %s", explorer.Pid(), result->error.c_str());
             WriteTextFile(directory + protocol::kProblemFile, result->error);
-            NotifyOnce(directory, L"paused " + builds, kPausedMessage);
+            NotifyOnce(directory, L"paused " + Builds(explorer, switcher), kPausedMessage);
             return std::nullopt;
         }
         WriteTextFile(directory + protocol::kProblemFile,
@@ -170,17 +179,56 @@ std::optional<internals::Internals> Discover(Explorer& explorer, HANDLE stop, co
     }
 }
 
+// Waits until Explorer has loaded the module. Returns false, with `wake` set,
+// when the wait was interrupted.
+bool WaitForModule(const Explorer& explorer, const wchar_t* name, HANDLE stop, Wake& wake) {
+    while (!explorer.HasModule(name)) {
+        wake = WaitFor(stop, explorer.Handle(), kPollMs);
+        if (wake != Wake::Timeout) return false;
+    }
+    return true;
+}
+
+// Loads the switcher DLL if Explorer hasn't yet, so the hooks are in place
+// for the first Alt+Tab, which would load the same file. Returns false if it
+// couldn't be loaded, or the loaded file isn't the one discovery analysed.
+bool LoadSwitcher(Explorer& explorer, const std::wstring& path, const internals::Module& analysed) {
+    if (!explorer.HasModule(internals::kSwitcherDll)) {
+        std::optional<bool> loaded = explorer.Load(path);
+        if (!loaded || !*loaded) {
+            Log(L"Explorer %lu: loading %s failed%s", explorer.Pid(), path.c_str(),
+                loaded ? L"" : L" (no answer in time)");
+            return false;
+        }
+        Log(L"Explorer %lu: loaded %s ahead of the first Alt+Tab", explorer.Pid(), internals::kSwitcherDll);
+    }
+    if (explorer.LoadedImage(internals::kSwitcherDll) != analysed) {
+        Log(L"Explorer %lu: the loaded %s isn't the file discovery analysed", explorer.Pid(), internals::kSwitcherDll);
+        return false;
+    }
+    return true;
+}
+
 // Serves one Explorer process until it exits or the agent is asked to stop.
 // Returns false when the agent should exit.
 bool ServeExplorer(Explorer& explorer, HANDLE stop, const std::wstring& directory, CrashGuard& guard) {
     std::wstring dll = directory + protocol::kHookDll;
-    // Explorer loads its Alt+Tab code only when Alt+Tab is first used.
-    while (!explorer.HasAltTabModules()) {
-        Wake wake = WaitFor(stop, explorer.Handle(), kPollMs);
-        if (wake != Wake::Timeout) return wake == Wake::ExplorerExited;
+    Wake wake = Wake::Timeout;
+    // Explorer loads twinui while it starts, and the switcher only on the first
+    // Alt+Tab. The agent loads the switcher itself, from where Windows registered
+    // it, so the first opening already builds the kept menu.
+    if (!WaitForModule(explorer, internals::kTwinuiDll, stop, wake)) return wake == Wake::ExplorerExited;
+    std::wstring switcher = explorer.ModulePath(internals::kSwitcherDll);
+    if (switcher.empty()) switcher = RegisteredComponentPath(internals::kSwitcherDll);
+    if (switcher.empty()) {
+        Log(L"Explorer %lu: %s isn't registered; waiting for the first Alt+Tab to load it", explorer.Pid(),
+            internals::kSwitcherDll);
+        if (!WaitForModule(explorer, internals::kSwitcherDll, stop, wake)) return wake == Wake::ExplorerExited;
+        switcher = explorer.ModulePath(internals::kSwitcherDll);
     }
-    if (Wake wake = WaitFor(stop, explorer.Handle(), kSettleMs); wake != Wake::Timeout) {
-        return wake == Wake::ExplorerExited;
+    if (explorer.HasModule(internals::kSwitcherDll)) {  // loaded by an opening that may still be in progress
+        wake = WaitFor(stop, explorer.Handle(), kSettleMs);
+        if (wake != Wake::Timeout) return wake == Wake::ExplorerExited;
     }
 
     bool hooked;  // our copy is active in this Explorer
@@ -188,9 +236,9 @@ bool ServeExplorer(Explorer& explorer, HANDLE stop, const std::wstring& director
         hooked = explorer.HasLoaded(dll);  // left running by an agent that was killed
         Log(L"Explorer %lu: %s", explorer.Pid(), hooked ? L"hooks already active" : L"another copy is already active");
     } else {
-        Wake wake = Wake::Timeout;
-        std::optional<internals::Internals> found = Discover(explorer, stop, directory, Builds(explorer), wake);
+        std::optional<internals::Internals> found = Discover(explorer, switcher, stop, directory, wake);
         if (wake != Wake::Timeout) return wake == Wake::ExplorerExited;
+        if (found && !LoadSwitcher(explorer, switcher, found->switcher.module)) found.reset();
         std::optional<DWORD> result = found ? explorer.LoadAndStart(dll, *found) : std::nullopt;
         hooked = result == protocol::kStarted;
         if (hooked) DeleteFileW((directory + protocol::kProblemFile).c_str());
@@ -199,10 +247,9 @@ bool ServeExplorer(Explorer& explorer, HANDLE stop, const std::wstring& director
 
     HANDLE turnedOff =
         hooked ? OpenEventW(SYNCHRONIZE, FALSE, protocol::TurnedOffEventName(explorer.Pid()).c_str()) : nullptr;
-    Wake wake;
     while ((wake = WaitFor(stop, explorer.Handle(), INFINITE, turnedOff)) == Wake::TurnedOff) {
         Log(L"Explorer %lu: the hooks turned themselves off (see hook.log)", explorer.Pid());
-        NotifyOnce(directory, L"turned off " + Builds(explorer), kTurnedOffMessage);
+        NotifyOnce(directory, L"turned off " + Builds(explorer, switcher), kTurnedOffMessage);
         CloseHandle(turnedOff);
         turnedOff = nullptr;
     }

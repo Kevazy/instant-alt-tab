@@ -38,9 +38,10 @@ functions:
 - **It rebuilds when it has to:** when the display, resolution, DPI, theme or contrast settings
   change.
 
-The menu that is kept has to be built once, so the first Alt+Tab after installing opens at the usual
-speed. After Explorer starts (at sign-in, or after a restart), the first two do: Windows loads its
-Alt+Tab code only on the first press, and the hooks can attach only after that.
+The menu that is kept has to be built once, so the first Alt+Tab after installing, and the first
+after Explorer starts (at sign-in, or after a restart), open at the usual speed. Windows loads part
+of its Alt+Tab code only on the first press; the agent loads it as soon as Explorer starts, so the
+hooks are ready for that first press.
 [docs/internals.md](docs/internals.md) explains each hook and how the internals are found.
 
 ## Install
@@ -116,7 +117,8 @@ if you want to check what it does or build it yourself.
   else is downloaded or sent.
 - **Explorer:** keeps one Alt+Tab menu alive instead of building one per press; it is the same menu
   Windows builds every time you press Alt+Tab. Over a 30-opening test with windows opening and
-  closing, Explorer's memory and handle count stayed flat.
+  closing, Explorer's memory and handle count stayed flat. Windows' Alt+Tab menu DLL is loaded when
+  Explorer starts rather than at the first Alt+Tab.
 - **Background:** the agent sleeps until Explorer starts or exits. Working out the internals takes
   about 0.2 s per Explorer start once the symbols are known.
 

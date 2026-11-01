@@ -1,7 +1,7 @@
 #pragma once
 
-// The shell's Explorer process: finding it, waiting until its Alt+Tab modules
-// are loaded, and loading, starting, stopping and unloading the hook DLL in it.
+// The shell's Explorer process: finding it, reading which modules it loaded,
+// and loading, starting, stopping and unloading the hook DLL in it.
 
 #include "../shared/internals.h"
 
@@ -26,9 +26,9 @@ public:
     HANDLE Handle() const { return process_; }  // signaled when Explorer exits
     DWORD ExitCode() const;
 
-    // twinui and the switcher are loaded once Alt+Tab is first used.
-    bool HasAltTabModules() const;
-    // The file a module (by name) was loaded from, and the identity of the loaded image.
+    // Whether a module (by name) is loaded, the file it was loaded from, and the
+    // identity of the loaded image.
+    bool HasModule(const wchar_t* name) const;
     std::wstring ModulePath(const wchar_t* name) const;
     std::optional<internals::Module> LoadedImage(const wchar_t* name) const;
     // Whether some copy of the hook DLL is started, and whether it still keeps
@@ -43,6 +43,9 @@ public:
     // in time. Its code may then still be running, so nothing is freed or
     // unloaded and that copy must be left alone until Explorer exits.
 
+    // Loads a DLL of Windows' own that Explorer would load later anyway; it stays
+    // loaded. Returns whether it is loaded now.
+    std::optional<bool> Load(const std::wstring& dllPath);
     // Loads the DLL and calls Start with what discovery found; unloads it again
     // unless it started. Call it only when no copy is hooked, so loads and
     // unloads stay paired.
