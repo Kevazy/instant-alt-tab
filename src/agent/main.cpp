@@ -27,10 +27,12 @@
 
 namespace {
 
-constexpr DWORD kPollMs = 2000;                // how often to look for the shell Explorer and its Alt+Tab modules
-constexpr DWORD kSettleMs = 1500;              // lets the Alt+Tab opening that loaded the switcher finish first
-constexpr DWORD kFirstRetryMs = 60 * 1000;     // a failed symbol download is tried again after a minute,
-constexpr DWORD kMaxRetryMs = 60 * 60 * 1000;  // then less often, up to hourly
+constexpr DWORD kPollMs = 2000;                     // how often to look for the shell Explorer and its Alt+Tab modules
+constexpr DWORD kSettleMs = 1500;                   // lets the Alt+Tab opening that loaded the switcher finish first
+constexpr DWORD kDownloadRetryFirstMs = 60 * 1000;  // a failed symbol download is tried again after a minute,
+constexpr DWORD kDownloadRetryMaxMs = 60 * 60 * 1000;       // then less often, up to hourly
+constexpr DWORD kLongWaitStepMs = 60 * 60 * 1000;           // long waits are made of pieces this long, so sleep counts
+constexpr int kFailedDownloadsBeforeNotice = 5;             // failures at 0, 1, 3, 7, 15 min: not just a slow sign-in
 constexpr DWORD kUnpublishedRetryMs = 24 * 60 * 60 * 1000;  // symbols Microsoft hasn't published: daily
 
 enum class WakeReason { Timeout, Stop, ExplorerExited, TurnedOff };
@@ -57,7 +59,7 @@ WakeReason WaitWallClock(HANDLE stop, HANDLE explorer, ULONGLONG ms) {
     };
     for (ULONGLONG until = now() + ms, current = now(); current < until; current = now()) {
         WakeReason wake =
-            WaitFor(stop, explorer, static_cast<DWORD>(std::min<ULONGLONG>(until - current, kMaxRetryMs)));
+            WaitFor(stop, explorer, static_cast<DWORD>(std::min<ULONGLONG>(until - current, kLongWaitStepMs)));
         if (wake != WakeReason::Timeout) return wake;
     }
     return WakeReason::Timeout;
@@ -92,6 +94,10 @@ constexpr wchar_t kUnpublishedMessage[] =
     L"Alt+Tab is at normal speed for now: Microsoft hasn't yet published the debugging symbols Instant Alt+Tab "
     L"needs for this version of Windows. It checks again once a day and speeds Alt+Tab up as soon as they're "
     L"available.";
+constexpr wchar_t kOfflineMessage[] =
+    L"Alt+Tab is at normal speed for now: after a Windows update, Instant Alt+Tab downloads a file from "
+    L"Microsoft's symbol server once, and it couldn't reach it. It keeps trying, and speeds Alt+Tab up as soon "
+    L"as it gets through.";
 constexpr wchar_t kTurnedOffMessage[] =
     L"Instant Alt+Tab turned itself off: something in Explorer didn't behave as expected. Alt+Tab is back to normal "
     L"speed until Explorer restarts.\n\nDetails are in hook.log.";
@@ -115,12 +121,11 @@ std::wstring BuildKey(const ExplorerProcess& explorer, const std::wstring& switc
 // Runs discovery on a worker thread, so a stop request or Explorer exiting is
 // noticed at once, even during the symbol download. Returns nothing, with
 // `wake` set, when interrupted.
-std::optional<Discovery::Result> DiscoverInBackground(const std::wstring& twinui, const std::wstring& switcher,
-                                                      const std::wstring& dataModel, const std::wstring& cache,
+std::optional<Discovery::Result> DiscoverInBackground(const Discovery::DllPaths& dlls, const std::wstring& cache,
                                                       HANDLE stop, HANDLE explorer, WakeReason& wake) {
     HANDLE cancel = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     auto result = std::make_shared<Discovery::Result>();
-    std::thread worker([=] { *result = Discovery::Discover(twinui, switcher, dataModel, cache, cancel); });
+    std::thread worker([=] { *result = Discovery::Discover(dlls, cache, cancel); });
     HANDLE handles[] = {stop, explorer, worker.native_handle()};
     DWORD waited = WaitForMultipleObjects(3, handles, FALSE, INFINITE);
     if (waited == WAIT_OBJECT_0 + 2) {
@@ -156,10 +161,11 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
     // Optional: the class of the shell's items, from the DLL that implements them.
     std::wstring dataModel = explorer.ModulePath(AltTab::kDataModelDll);
     if (dataModel.empty()) dataModel = RegisteredDllPath(AltTab::kDataModelDll);
-    for (DWORD retryMs = kFirstRetryMs;; retryMs = std::min(retryMs * 2, kMaxRetryMs)) {
+    int failedDownloads = 0;
+    for (DWORD retryMs = kDownloadRetryFirstMs;; retryMs = std::min(retryMs * 2, kDownloadRetryMaxMs)) {
         ULONGLONG started = GetTickCount64();
         std::optional<Discovery::Result> result = DiscoverInBackground(
-            twinui, switcher, dataModel, directory + SharedNames::kSymbolsFolder, stop, explorer.Handle(), wake);
+            {twinui, switcher, dataModel}, directory + SharedNames::kSymbolsFolder, stop, explorer.Handle(), wake);
         if (!result) return std::nullopt;
         auto switcherImage = explorer.LoadedImage(AltTab::kSwitcherDll);
         if (result->internals && (result->internals->twinui.module != *twinuiImage ||
@@ -171,6 +177,11 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
         }
         if (result->internals) {
             Log(L"Explorer %lu: found the Alt+Tab internals in %llu ms", explorer.Pid(), GetTickCount64() - started);
+            if (!result->internals->dataModel.itemVtables[0]) {
+                Log(L"Explorer %lu: %s's item class wasn't found, so the second Alt+Tab after Explorer starts may "
+                    L"rebuild the menu once",
+                    explorer.Pid(), AltTab::kDataModelDll);
+            }
             return result->internals;
         }
         if (!result->retryLater) {
@@ -183,6 +194,8 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
         if (result->notPublished) {
             waitMs = kUnpublishedRetryMs;
             Alert::ShowOnce(directory, L"unpublished " + BuildKey(explorer, switcher), kUnpublishedMessage);
+        } else if (++failedDownloads == kFailedDownloadsBeforeNotice) {
+            Alert::ShowOnce(directory, L"offline " + BuildKey(explorer, switcher), kOfflineMessage);
         }
         WriteTextFile(directory + SharedNames::kProblemFile,
                       L"waiting to download Windows' public symbols: " + result->error);

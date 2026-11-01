@@ -22,13 +22,12 @@ bool IsVtable(const PeFile& file, uint32_t rva) {
     return address > file.ImageBase() && file.IsCode(static_cast<uint32_t>(address - file.ImageBase()));
 }
 
-Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath, const std::wstring& dataModelPath,
-                const std::wstring& cacheDirectory, HANDLE cancel) {
+Result Discover(const DllPaths& dlls, const std::wstring& cacheDirectory, HANDLE cancel) {
     Result result;
-    auto twinui = PeFile::Load(twinuiPath);
-    auto switcher = PeFile::Load(switcherPath);
+    auto twinui = PeFile::Load(dlls.twinui);
+    auto switcher = PeFile::Load(dlls.switcher);
     if (!twinui || !switcher) {
-        result.error = L"couldn't read " + (twinui ? switcherPath : twinuiPath);
+        result.error = L"couldn't read " + (twinui ? dlls.switcher : dlls.twinui);
         return result;
     }
     AltTab::Internals found;
@@ -43,7 +42,7 @@ Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath
     }
     found.twinui.module = {twinui->TimeDateStamp(), twinui->SizeOfImage()};
     found.switcher.module = {switcher->TimeDateStamp(), switcher->SizeOfImage()};
-    if (auto dataModel = dataModelPath.empty() ? std::nullopt : PeFile::Load(dataModelPath)) {
+    if (auto dataModel = dlls.dataModel.empty() ? std::nullopt : PeFile::Load(dlls.dataModel)) {
         FindDataModelInternals(*dataModel, cacheDirectory, cancel, found.dataModel);
     }
     result.internals = found;

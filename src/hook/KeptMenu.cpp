@@ -136,15 +136,15 @@ namespace {
 
 // Deferred work runs on the worker window, never nested inside a hooked call.
 LRESULT CALLBACK WorkerProc(HWND window, UINT message, WPARAM wParam, LPARAM lParam) {
-    constexpr UINT_PTR kRetryTimer = 1;
-    if (message != WM_APP && !(message == WM_TIMER && wParam == kRetryTimer)) {
+    constexpr UINT_PTR kDeferredWorkTimer = 1;
+    if (message != WM_APP && !(message == WM_TIMER && wParam == kDeferredWorkTimer)) {
         return DefWindowProcW(window, message, wParam, lParam);
     }
     if (HookScope::InsideHookOnThisThread()) {
-        SetTimer(window, kRetryTimer, 50, nullptr);
+        SetTimer(window, kDeferredWorkTimer, 50, nullptr);
         return 0;
     }
-    KillTimer(window, kRetryTimer);
+    KillTimer(window, kDeferredWorkTimer);
     if (g_turnOffRequested.exchange(false)) CompleteTurnOff();
     CloseQueuedLists();
     if (g_finalStop) {

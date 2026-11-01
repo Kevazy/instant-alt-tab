@@ -51,7 +51,7 @@ int wmain(int argc, wchar_t** argv) {
     CreateDirectoryW(cache.c_str(), nullptr);
 
     ULONGLONG started = GetTickCount64();
-    Discovery::Result result = Discovery::Discover(twinui, switcher, dataModel, cache);
+    Discovery::Result result = Discovery::Discover({twinui, switcher, dataModel}, cache);
     if (!result.internals) {
         fwprintf(stderr, L"not found%s: %s\n", result.retryLater ? L" (retry later)" : L"", result.error.c_str());
         return 1;

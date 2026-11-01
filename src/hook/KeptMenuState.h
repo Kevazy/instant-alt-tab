@@ -86,10 +86,9 @@ struct Opening {
 // Explorer's UI thread (the thread that first shows the menu), except the
 // atomics.
 extern ModuleImage g_twinuiImage, g_switcherImage;
-extern AltTab::TwinuiInternals g_twinuiInternals;
-extern AltTab::DataModelInternals
-    g_dataModelInternals;            // the item class's vtables, if found  // what discovery found in twinui
-extern uint32_t g_listClosedOffset;  // and the card list member closeList sets
+extern AltTab::TwinuiInternals g_twinuiInternals;        // what discovery found in twinui
+extern AltTab::DataModelInternals g_dataModelInternals;  // the item class's vtables, if found
+extern uint32_t g_listClosedOffset;                      // the card list member closeList sets
 extern std::optional<MenuState> g_kept;
 extern Opening* g_opening;
 extern std::atomic<bool> g_enabled;
@@ -97,9 +96,10 @@ extern std::atomic<bool> g_failed;  // turned off because something unexpected h
 extern std::atomic<DWORD> g_uiThread;
 extern SRWLOCK g_uiThreadLock;  // claiming the UI thread vs. stopping
 extern bool g_stopping;
+// Where a card keeps its ISwitchItem (MenuSelection.cpp), and whether an item
+// Show navigated to confirmed it (rather than only the item class).
 extern size_t g_cardItemOffset;
-extern bool g_cardItemOffsetConfirmed;  // by an item Show navigated to, not only by the item class  // where a card
-                                        // keeps its ISwitchItem (MenuSelection.cpp)
+extern bool g_cardItemOffsetConfirmed;
 
 // KeptMenu.cpp
 // Fails closed: something unexpected happened, so stop keeping menus.

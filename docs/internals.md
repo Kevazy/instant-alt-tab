@@ -49,6 +49,8 @@ Windows' own, and Explorer would have loaded it at the first Alt+Tab anyway.
 | When the hooks start in a new Explorer | `ServeExplorer` and `StartHooks` in `src/agent/main.cpp` |
 | Whether an Explorer exit counts as a crash | `CrashGuard::IsCrash` in `src/agent/CrashGuard.h` |
 | Which messages the user has seen | `Alert::ShowOnce` in `src/agent/Alert.cpp` |
+| How often a failed symbol download is retried, and when the user is told | `kDownloadRetryFirstMs`, `kDownloadRetryMaxMs` and `kUnpublishedRetryMs` in `src/agent/main.cpp` |
+| Keyboard focus and the selection border on a reused menu | `ShowSelectionAsKeyboardFocus` in `src/hook/MenuSelection.cpp` |
 
 ### Files next to the agent
 
@@ -77,7 +79,11 @@ The agent and the hook DLL keep a few small files in the folder they run from (t
 - **Opening**: one appearance of the menu, from Alt+Tab until it closes.
 - **Kept menu**: the control Instant Alt+Tab keeps alive between openings. A **rebuild** drops it
   and lets Windows build a new one, which makes that opening as slow as stock.
-- **Stock**: Windows' own Alt+Tab, with no hooks active. Instant Alt+Tab ends up stock in three ways:
+- **Stock**: Windows' own Alt+Tab, with no hooks active. Instant Alt+Tab ends up stock in these ways:
+  - **waiting for symbols**: right after a Windows update, until the new build's public symbols are
+    downloaded. A failed download is retried after a minute, then less often up to hourly; after
+    about 15 minutes the user is told once. If Microsoft hasn't published them yet, the agent tells
+    the user once and checks daily.
   - **paused**: discovery didn't recognize this Windows build, so the hooks never load; until the
     next Windows update changes the DLLs.
   - **turned off**: the hooks saw something unexpected in Explorer and stopped; until Explorer
@@ -256,7 +262,8 @@ encodings, register use or prologues still match:
 **SwitcherDataModel.dll** implements the items behind the cards (the class `RootSwitchItem`). Its
 small PDB (under 1 MB) gives the vtables of that class, by the name `RootSwitchItem::vftable`. They
 are optional: without them the card layout is learned one opening later, from an item Show
-navigates to.
+navigates to, so the second Alt+Tab after Explorer starts rebuilds the menu once (agent.log says
+so).
 
 The code walker follows a function from its start, and code reached only by a jump starts from
 the registers at the jumps to it. That is approximate, so every rule also checks that what it found

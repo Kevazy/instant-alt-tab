@@ -133,7 +133,8 @@ if you want to check what it does or build it yourself.
   Windows builds every time you press Alt+Tab. Over a 30-opening test with windows opening and
   closing, Explorer's memory and handle count stayed flat. Windows' Alt+Tab menu DLL is loaded when
   Explorer starts rather than at the first Alt+Tab.
-- **Background:** the agent sleeps until Explorer starts or exits. Working out the internals takes
+- **Background:** the agent waits for Explorer to exit, and checks every 2 s for a new one while
+  there is none. Working out the internals takes
   about 0.2 s per Explorer start once the symbols are known.
 
 ## Building

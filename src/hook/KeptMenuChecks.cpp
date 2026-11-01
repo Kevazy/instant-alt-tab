@@ -69,7 +69,9 @@ std::optional<DisplayContext> ReadContext(void* display, HWND menuWindow) {
 std::wstring ContextChanges(const DisplayContext& a, const DisplayContext& b) {
     std::wstring changes;
     if (a.display != b.display) changes += L" display";
-    if (a.monitor != b.monitor || !EqualRect(&a.monitorBounds, &b.monitorBounds)) changes += L" monitor";
+    if (a.monitor != b.monitor || !EqualRect(&a.monitorBounds, &b.monitorBounds)) {
+        changes += L" monitor (" + a.monitor + L" to " + b.monitor + L")";
+    }
     if (!EqualRect(&a.workArea, &b.workArea)) changes += L" work-area";
     if (a.dpi != b.dpi) changes += L" dpi";
     if (a.appsLightTheme != b.appsLightTheme || a.systemLightTheme != b.systemLightTheme) changes += L" theme";

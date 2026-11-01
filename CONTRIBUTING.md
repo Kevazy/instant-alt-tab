@@ -1,7 +1,8 @@
 # Contributing
 
 [docs/internals.md](docs/internals.md) explains how everything works, where each part of the source
-lives, and the words used for it. The README's [Building](README.md#building) section covers the build.
+lives, and the words used for it; read its [glossary](docs/internals.md#words-used-here) first if
+terms like vtable, RVA or PDB are new. The README's [Building](README.md#building) section covers the build.
 
 ## Code style
 
@@ -19,7 +20,7 @@ Names follow Microsoft's C++ style, the one used in Windows Terminal and PowerTo
 | Each part of the program | a namespace named after it; small helpers used everywhere (`Log`, `ReadPointer`) are plain functions | `Discovery::Discover`, `KeptMenu::InstallHooks` |
 | Locals, parameters, struct fields | camelCase | `hostControl` |
 | Class members | `m_` + camelCase; static ones `s_` | `m_process` |
-| Globals and thread-locals | `g_` and `t_` + camelCase | `g_internals` |
+| Globals and thread-locals | `g_` and `t_` + camelCase | `g_twinuiInternals` |
 | Constants and enumerators | `k` + PascalCase | `kAgentMutex` |
 
 Names that exist outside the source don't follow this, and must not change: the executable and DLL
@@ -31,13 +32,18 @@ Comments say why, in plain words. A newcomer should be able to follow the code w
 
 ## Adding a value discovery must find
 
+An optional value from another DLL follows `SwitcherDataModel.dll`: its own `Find...Internals.cpp`
+that never throws, a struct in `AltTabInternals.h` that stays zero when nothing is found, a path in
+`Discovery::DllPaths` (the agent fills it in `DiscoverWithRetries`), and a hook that works without it.
+
 1. Add the field to `src/shared/AltTabInternals.h` and raise `kInternalsVersion`: the agent copies
    that struct into Explorer as is, so its layout is the contract with the hook DLL.
 2. Write the rule in `src/discovery/FindTwinuiInternals.cpp` or `FindSwitcherInternals.cpp`. A rule must match
    exactly once (`ExactlyOne`); anything else is an error, and the hooks stay off.
 3. Print it in `tools/Discover.cpp`.
-4. Use it in the hook through `g_internals`, and check it at run time where a wrong value could do
+4. Use it in the hook through the DLL's copy (`g_twinuiInternals`, `g_switcherInternals` or
+   `g_dataModelInternals`), and check it at run time where a wrong value could do
    harm (see "Safety" in the docs).
 5. Describe the rule in the "Finding the internals" table of `docs/internals.md`.
-6. Run `discover` on every build of the two DLLs you have; the docs'
+6. Run `discover` on every build of the DLLs you have; the docs'
    [Checking a Windows build](docs/internals.md#checking-a-windows-build) says where to find them.
