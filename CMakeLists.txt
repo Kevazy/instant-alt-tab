@@ -47,8 +47,8 @@ set_project_warnings(shared)
 add_library(hook SHARED
     src/hook/DllMain.cpp
     src/hook/Hooking.cpp
-    src/hook/CardListUpdates.cpp
-    src/hook/PersistentMenu.cpp
+    src/hook/QuietCardEdits.cpp
+    src/hook/KeptMenu.cpp
     src/hook/KeptMenuChecks.cpp
     src/hook/MenuSelection.cpp
     src/hook/ComObjects.cpp)
@@ -63,7 +63,7 @@ add_library(agent_core STATIC
 set_project_warnings(agent_core)
 
 # Runs in the background from sign-in; no window.
-add_executable(agent WIN32 src/agent/main.cpp src/agent/ComponentRegistration.cpp src/agent/Alert.cpp)
+add_executable(agent WIN32 src/agent/main.cpp src/agent/RegisteredDllPath.cpp src/agent/Alert.cpp)
 set_target_properties(agent PROPERTIES OUTPUT_NAME instant-alt-tab-agent)
 set_project_warnings(agent)
 target_link_libraries(agent PRIVATE agent_core discovery shared)
@@ -84,9 +84,9 @@ add_library(discovery STATIC
     src/discovery/CodeAnalysis.cpp
     src/discovery/Discovery.cpp
     src/discovery/PeFile.cpp
-    src/discovery/SwitcherRules.cpp
+    src/discovery/FindSwitcherInternals.cpp
     src/discovery/Symbols.cpp
-    src/discovery/TwinuiRules.cpp)
+    src/discovery/FindTwinuiInternals.cpp)
 set_project_warnings(discovery)
 target_link_libraries(discovery PUBLIC zydis PRIVATE winhttp)
 

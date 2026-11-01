@@ -11,7 +11,7 @@ namespace Installer {
 std::wstring InstallDirectory();  // with a trailing backslash
 bool IsInstalled();
 bool StartsAtSignIn();
-bool Disabled();  // by the crash guard
+bool DisabledByCrashGuard();
 
 bool Install(const std::wstring& sourceDirectory);
 bool Uninstall(const std::wstring& runningFrom);

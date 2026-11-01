@@ -1,4 +1,4 @@
-#include "ComponentRegistration.h"
+#include "RegisteredDllPath.h"
 
 #include <windows.h>
 
@@ -13,7 +13,7 @@ bool NamesFile(const wchar_t* path, const wchar_t* fileName) {
 
 }  // namespace
 
-std::wstring RegisteredComponentPath(const wchar_t* fileName) {
+std::wstring RegisteredDllPath(const wchar_t* fileName) {
     HKEY classes;
     if (RegOpenKeyExW(HKEY_LOCAL_MACHINE, kActivatableClasses, 0, KEY_READ, &classes) != ERROR_SUCCESS) return L"";
     std::wstring found;

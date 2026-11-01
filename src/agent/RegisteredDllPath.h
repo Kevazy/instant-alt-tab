@@ -9,4 +9,4 @@
 
 // The full path of the component DLL with this file name, or an empty string
 // if no class is registered to it or its classes name different files.
-std::wstring RegisteredComponentPath(const wchar_t* fileName);
+std::wstring RegisteredDllPath(const wchar_t* fileName);

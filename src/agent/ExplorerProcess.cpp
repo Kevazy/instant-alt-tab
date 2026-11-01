@@ -1,6 +1,7 @@
 #include "ExplorerProcess.h"
 
-#include "../shared/Ipc.h"
+#include "../shared/HookExports.h"
+#include "../shared/SharedNames.h"
 
 #include <psapi.h>
 
@@ -81,9 +82,9 @@ static bool MarkerExists(const std::wstring& name) {
     return marker != nullptr;
 }
 
-bool ExplorerProcess::IsHooked() const { return MarkerExists(Ipc::HookedMarkerName(m_pid)); }
+bool ExplorerProcess::IsHooked() const { return MarkerExists(SharedNames::HookedMarkerName(m_pid)); }
 
-bool ExplorerProcess::IsActive() const { return MarkerExists(Ipc::ActiveMarkerName(m_pid)); }
+bool ExplorerProcess::IsActive() const { return MarkerExists(SharedNames::ActiveMarkerName(m_pid)); }
 
 bool ExplorerProcess::HasLoaded(const std::wstring& dllPath) const { return FindModule(dllPath) != nullptr; }
 
@@ -112,18 +113,18 @@ std::optional<DWORD> ExplorerProcess::LoadAndStart(const std::wstring& dllPath, 
         Unload(module);
         return 0;
     }
-    std::optional<DWORD> result = CallExport(module, dllPath, Ipc::kStartExport, remoteFound);
+    std::optional<DWORD> result = CallExport(module, dllPath, HookExports::kStartExport, remoteFound);
     if (!result) return result;  // Start may still read it: keep the copy
     VirtualFreeEx(m_process, remoteFound, 0, MEM_RELEASE);
-    if (*result != Ipc::kStarted) Unload(module);
+    if (*result != HookExports::kStarted) Unload(module);
     return result;
 }
 
 std::optional<DWORD> ExplorerProcess::StopAndUnload(const std::wstring& dllPath) {
     HMODULE module = FindModule(dllPath);
-    if (!module) return Ipc::kNotRunning;
-    std::optional<DWORD> result = CallExport(module, dllPath, Ipc::kStopExport);
-    if (result && (*result == Ipc::kStopped || *result == Ipc::kNotRunning)) Unload(module);
+    if (!module) return HookExports::kNotRunning;
+    std::optional<DWORD> result = CallExport(module, dllPath, HookExports::kStopExport);
+    if (result && (*result == HookExports::kStopped || *result == HookExports::kNotRunning)) Unload(module);
     return result;
 }
 

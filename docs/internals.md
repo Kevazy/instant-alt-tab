@@ -29,10 +29,10 @@ Windows' own, and Explorer would have loaded it at the first Alt+Tab anyway.
 | Folder | Becomes | What's in it |
 |---|---|---|
 | `src/cli` | `instant-alt-tab.exe` | the commands (`main.cpp`), installing and uninstalling (`Installer`), starting and stopping the agent (`AgentClient`), console output (`Console`) |
-| `src/agent` | `instant-alt-tab-agent.exe` | the loop that serves each Explorer (`main.cpp`); finding Explorer and loading, starting and stopping the hook DLL in it (`ExplorerProcess`); turning everything off after repeated Explorer crashes (`CrashGuard`); the message window (`Alert`) |
-| `src/discovery` | part of the agent | finding what the hooks need: the entry point (`Discovery`), the rules for each DLL (`TwinuiRules`, `SwitcherRules`, `Rules.h`), downloading and reading public symbols (`Symbols`), reading DLL files (`PeFile`), following what machine code does (`CodeAnalysis`) |
-| `src/hook` | `instant-alt-tab-hook.dll` | the `Start` and `Stop` exports (`DllMain.cpp`), keeping the menu: its hooks and life (`PersistentMenu`), whether it still fits an opening (`KeptMenuChecks`), the selection each opening starts with (`MenuSelection`); quiet card edits (`CardListUpdates`); reading COM objects at discovered offsets (`ComObjects`); the layer over MinHook (`Hooking`) |
-| `src/shared` | all three | what discovery hands the hooks (`AltTabInternals.h`), the names and codes the three programs agree on (`Ipc.h`), the log (`Log`), small text files (`TextFile`) |
+| `src/agent` | `instant-alt-tab-agent.exe` | the loop that serves each Explorer (`main.cpp`); finding Explorer and loading, starting and stopping the hook DLL in it (`ExplorerProcess`); finding the switcher DLL where Windows registered it (`RegisteredDllPath`); turning everything off after repeated Explorer crashes (`CrashGuard`); the message window, shown once per message and Windows build (`Alert`) |
+| `src/discovery` | part of the agent | finding what the hooks need: the entry point (`Discovery`), the rules for each DLL (`FindTwinuiInternals`, `FindSwitcherInternals`, `FindInternals.h`), downloading and reading public symbols (`Symbols`), reading DLL files (`PeFile`), following what machine code does (`CodeAnalysis`) |
+| `src/hook` | `instant-alt-tab-hook.dll` | the `Start` and `Stop` exports (`DllMain.cpp`), keeping the menu: its hooks and life (`KeptMenu`, with the state its files share in `KeptMenuState.h`), whether it still fits an opening (`KeptMenuChecks`), the selection each opening starts with (`MenuSelection`); quiet card edits (`QuietCardEdits`); reading COM objects at discovered offsets (`ComObjects`); the layer over MinHook (`Hooking`) |
+| `src/shared` | all three | what discovery hands the hooks (`AltTabInternals.h`), the names and codes the three programs agree on (`SharedNames.h`, `HookExports.h`), the log (`Log`), small text files (`TextFile`) |
 | `tools` | built on request | `Discover` runs discovery on any copies of the two DLLs; `MeasureLatency` measures how long the menu takes to appear |
 
 [CONTRIBUTING.md](../CONTRIBUTING.md) has the code style and a checklist for adding a discovered value.
@@ -91,7 +91,7 @@ windows that is ~280 ms before the first frame.
 
 ## The hooks
 
-### Keeping the menu (`PersistentMenu.cpp`, `KeptMenuChecks.cpp`)
+### Keeping the menu (`KeptMenu.cpp`, `KeptMenuChecks.cpp`)
 
 | Hooked | Why |
 |---|---|
@@ -119,7 +119,7 @@ A kept list that went through it would never hear of another window change. So t
 the kept list, which leaves the list exactly as it is after Esc. When the kept menu is dropped, the
 list is closed the stock way; otherwise the data source would keep it alive.
 
-### Quiet card edits (`CardListUpdates.cpp`)
+### Quiet card edits (`QuietCardEdits.cpp`)
 
 The switcher edits the card vector one element at a time, and XAML rebuilds a card for every change
 notification it gets. A re-sync after one window opens moves about 85 cards; a sort makes about

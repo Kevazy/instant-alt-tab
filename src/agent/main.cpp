@@ -5,14 +5,15 @@
 // starts the hooks, and starts them again after Explorer restarts. Windowless;
 // logs to agent.log next to itself.
 
-#include "ComponentRegistration.h"
+#include "Alert.h"
 #include "CrashGuard.h"
 #include "ExplorerProcess.h"
-#include "Alert.h"
+#include "RegisteredDllPath.h"
 #include "../discovery/Discovery.h"
 #include "../discovery/PeFile.h"
+#include "../shared/HookExports.h"
 #include "../shared/Log.h"
-#include "../shared/Ipc.h"
+#include "../shared/SharedNames.h"
 #include "../shared/TextFile.h"
 
 #include <windows.h>
@@ -48,11 +49,11 @@ WakeReason WaitFor(HANDLE stop, HANDLE explorer, DWORD timeoutMs, HANDLE turnedO
 const wchar_t* Describe(std::optional<DWORD> result) {
     if (!result) return L"Explorer didn't answer in time; leaving this Explorer alone";
     switch (*result) {
-        case Ipc::kStarted: return L"started";
-        case Ipc::kAlreadyRunning: return L"another copy is already active";
-        case Ipc::kUnsupportedBuild: return L"Explorer's code isn't what discovery analysed (see hook.log)";
-        case Ipc::kStartFailed: return L"starting the hooks failed (see hook.log)";
-        case Ipc::kNeedsReload: return L"an earlier copy is still loaded; waiting for Explorer to restart";
+        case HookExports::kStarted: return L"started";
+        case HookExports::kAlreadyRunning: return L"another copy is already active";
+        case HookExports::kUnsupportedBuild: return L"Explorer's code isn't what discovery analysed (see hook.log)";
+        case HookExports::kStartFailed: return L"starting the hooks failed (see hook.log)";
+        case HookExports::kNeedsReload: return L"an earlier copy is still loaded; waiting for Explorer to restart";
         default: return L"the DLL couldn't be loaded";
     }
 }
@@ -64,10 +65,6 @@ std::wstring ExecutableDirectory() {
     return directory.substr(0, directory.rfind(L'\\') + 1);
 }
 
-// What the user was already told, one line each ("paused <builds>"), so a
-// message isn't repeated at every sign-in.
-constexpr wchar_t kNotifiedFile[] = L"notified.txt";
-constexpr size_t kMaxNotified = 20;
 constexpr DWORD kCancelWaitMs = 45000;  // a cancelled download stops within one 30 s read
 
 constexpr wchar_t kPausedMessage[] =
@@ -92,20 +89,6 @@ std::wstring BuildKey(const ExplorerProcess& explorer, const std::wstring& switc
     wchar_t buildKey[32];
     swprintf_s(buildKey, L"%08x-%08x", twinui ? twinui->timeDateStamp : 0, switcher);
     return buildKey;
-}
-
-void ShowAlertOnce(const std::wstring& directory, const std::wstring& key, const wchar_t* message) {
-    std::wstring path = directory + kNotifiedFile;
-    std::vector<std::wstring> told;
-    std::wstringstream lines(ReadTextFile(path));
-    for (std::wstring line; std::getline(lines, line);) told.push_back(line);
-    if (std::find(told.begin(), told.end(), key) != told.end()) return;
-    told.push_back(key);
-    if (told.size() > kMaxNotified) told.erase(told.begin(), told.end() - kMaxNotified);
-    std::wstring content;
-    for (const std::wstring& line : told) content += line + L"\n";
-    WriteTextFile(path, content);
-    ShowAlert(message);
 }
 
 // Runs discovery on a worker thread, so a stop request or Explorer exiting is
@@ -141,8 +124,8 @@ std::optional<Discovery::Result> DiscoverInBackground(const std::wstring& twinui
 // load: `switcher` may not be loaded yet. Retries while the symbol download
 // fails; returns nothing when the hooks must stay off for this Explorer, or
 // when `wake` says the wait was interrupted.
-std::optional<AltTab::Internals> Discover(ExplorerProcess& explorer, const std::wstring& switcher, HANDLE stop,
-                                          const std::wstring& directory, WakeReason& wake) {
+std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, const std::wstring& switcher,
+                                                     HANDLE stop, const std::wstring& directory, WakeReason& wake) {
     std::wstring twinui = explorer.ModulePath(AltTab::kTwinuiDll);
     auto twinuiImage = explorer.LoadedImage(AltTab::kTwinuiDll);
     if (twinui.empty() || !twinuiImage) {
@@ -151,8 +134,8 @@ std::optional<AltTab::Internals> Discover(ExplorerProcess& explorer, const std::
     }
     for (DWORD retryMs = kFirstRetryMs;; retryMs = std::min(retryMs * 2, kMaxRetryMs)) {
         ULONGLONG started = GetTickCount64();
-        std::optional<Discovery::Result> result =
-            DiscoverInBackground(twinui, switcher, directory + L"symbols\\", stop, explorer.Handle(), wake);
+        std::optional<Discovery::Result> result = DiscoverInBackground(
+            twinui, switcher, directory + SharedNames::kSymbolsFolder, stop, explorer.Handle(), wake);
         if (!result) return std::nullopt;
         auto switcherImage = explorer.LoadedImage(AltTab::kSwitcherDll);
         if (result->internals && (result->internals->twinui.module != *twinuiImage ||
@@ -168,11 +151,12 @@ std::optional<AltTab::Internals> Discover(ExplorerProcess& explorer, const std::
         }
         if (!result->retryLater) {
             Log(L"Explorer %lu: Alt+Tab stays stock: %s", explorer.Pid(), result->error.c_str());
-            WriteTextFile(directory + Ipc::kProblemFile, result->error);
-            ShowAlertOnce(directory, L"paused " + BuildKey(explorer, switcher), kPausedMessage);
+            WriteTextFile(directory + SharedNames::kProblemFile, result->error);
+            Alert::ShowOnce(directory, L"paused " + BuildKey(explorer, switcher), kPausedMessage);
             return std::nullopt;
         }
-        WriteTextFile(directory + Ipc::kProblemFile, L"waiting to download Windows' public symbols: " + result->error);
+        WriteTextFile(directory + SharedNames::kProblemFile,
+                      L"waiting to download Windows' public symbols: " + result->error);
         Log(L"Explorer %lu: %s; trying again in %lu minutes", explorer.Pid(), result->error.c_str(), retryMs / 60000);
         wake = WaitFor(stop, explorer.Handle(), retryMs);
         if (wake != WakeReason::Timeout) return std::nullopt;
@@ -219,7 +203,7 @@ bool LoadSwitcher(ExplorerProcess& explorer, const std::wstring& path, const Alt
 std::wstring FindSwitcherPath(ExplorerProcess& explorer, HANDLE stop, WakeReason& wake) {
     std::wstring path = explorer.ModulePath(AltTab::kSwitcherDll);
     if (!path.empty()) return path;
-    path = RegisteredComponentPath(AltTab::kSwitcherDll);
+    path = RegisteredDllPath(AltTab::kSwitcherDll);
     if (!path.empty() && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) return path;
     Log(L"Explorer %lu: %s %s; waiting for the first Alt+Tab to load it", explorer.Pid(), AltTab::kSwitcherDll,
         path.empty() ? L"isn't registered" : L"is registered as a file that doesn't exist");
@@ -239,7 +223,7 @@ std::wstring FindSwitcherPath(ExplorerProcess& explorer, HANDLE stop, WakeReason
 std::optional<DWORD> StartHooks(ExplorerProcess& explorer, const std::wstring& switcher, const std::wstring& dll,
                                 HANDLE stop, const std::wstring& directory, WakeReason& wake, bool& injected) {
     bool explorerHadSwitcher = explorer.HasModule(AltTab::kSwitcherDll);
-    std::optional<AltTab::Internals> found = Discover(explorer, switcher, stop, directory, wake);
+    std::optional<AltTab::Internals> found = DiscoverWithRetries(explorer, switcher, stop, directory, wake);
     if (!found) return std::nullopt;
     // An Alt+Tab during discovery loaded the switcher: let that opening finish first.
     if (!explorerHadSwitcher && explorer.HasModule(AltTab::kSwitcherDll)) {
@@ -256,7 +240,7 @@ std::optional<DWORD> StartHooks(ExplorerProcess& explorer, const std::wstring& s
 // Serves one Explorer process until it exits or the agent is asked to stop.
 // Returns false when the agent should exit.
 bool ServeExplorer(ExplorerProcess& explorer, HANDLE stop, const std::wstring& directory, CrashGuard& guard) {
-    std::wstring dll = directory + Ipc::kHookDll;
+    std::wstring dll = directory + SharedNames::kHookDll;
     WakeReason wake = WakeReason::Timeout;
     // Explorer loads twinui while it starts, and the switcher only on the first
     // Alt+Tab. The agent loads the switcher itself, from where Windows registered
@@ -277,15 +261,15 @@ bool ServeExplorer(ExplorerProcess& explorer, HANDLE stop, const std::wstring& d
     } else {
         std::optional<DWORD> result = StartHooks(explorer, switcher, dll, stop, directory, wake, injected);
         if (wake != WakeReason::Timeout) return wake == WakeReason::ExplorerExited;
-        hooked = result == Ipc::kStarted;
-        if (hooked) DeleteFileW((directory + Ipc::kProblemFile).c_str());
+        hooked = result == HookExports::kStarted;
+        if (hooked) DeleteFileW((directory + SharedNames::kProblemFile).c_str());
     }
 
     HANDLE turnedOff =
-        hooked ? OpenEventW(SYNCHRONIZE, FALSE, Ipc::TurnedOffEventName(explorer.Pid()).c_str()) : nullptr;
+        hooked ? OpenEventW(SYNCHRONIZE, FALSE, SharedNames::TurnedOffEventName(explorer.Pid()).c_str()) : nullptr;
     while ((wake = WaitFor(stop, explorer.Handle(), INFINITE, turnedOff)) == WakeReason::TurnedOff) {
         Log(L"Explorer %lu: the hooks turned themselves off (see hook.log)", explorer.Pid());
-        ShowAlertOnce(directory, L"turned off " + BuildKey(explorer, switcher), kTurnedOffMessage);
+        Alert::ShowOnce(directory, L"turned off " + BuildKey(explorer, switcher), kTurnedOffMessage);
         CloseHandle(turnedOff);
         turnedOff = nullptr;
     }
@@ -311,10 +295,10 @@ bool ServeExplorer(ExplorerProcess& explorer, HANDLE stop, const std::wstring& d
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, PWSTR, int) {
     std::wstring directory = ExecutableDirectory();
-    SetLogFile(directory + L"agent.log");
+    SetLogFile(directory + SharedNames::kAgentLog);
     // The stop event exists before the mutex, so a stop request can't be missed.
-    HANDLE stop = CreateEventW(nullptr, TRUE, FALSE, Ipc::kAgentStopEvent);
-    HANDLE instance = CreateMutexW(nullptr, TRUE, Ipc::kAgentMutex);
+    HANDLE stop = CreateEventW(nullptr, TRUE, FALSE, SharedNames::kAgentStopEvent);
+    HANDLE instance = CreateMutexW(nullptr, TRUE, SharedNames::kAgentMutex);
     if (!stop || !instance || GetLastError() == ERROR_ALREADY_EXISTS) return 0;  // another agent is running
 
     CrashGuard guard(directory);

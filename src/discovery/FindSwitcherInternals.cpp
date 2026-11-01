@@ -4,7 +4,7 @@
 // registers and function prologues don't matter, so a recompile that
 // changes only those still matches.
 
-#include "Rules.h"
+#include "FindInternals.h"
 
 #include <algorithm>
 #include <map>
@@ -170,7 +170,7 @@ uint32_t FindDescendantSearch(const PeFile& file, const CodeIndex& code) {
 
 }  // namespace
 
-void FindSwitcher(const PeFile& file, AltTab::SwitcherInternals& switcher) {
+void FindSwitcherInternals(const PeFile& file, AltTab::SwitcherInternals& switcher) {
     CodeIndex code(file);
     std::vector<CardVector> vectors = FindCardVectors(file, code);
     if (vectors.size() != 1) {

@@ -4,7 +4,7 @@
 #include "Console.h"
 #include "../agent/CrashGuard.h"
 #include "../agent/ExplorerProcess.h"
-#include "../shared/Ipc.h"
+#include "../shared/SharedNames.h"
 
 #include <windows.h>
 #include <shlobj.h>
@@ -24,7 +24,7 @@ constexpr wchar_t kUninstallKey[] = L"Software\\Microsoft\\Windows\\CurrentVersi
 constexpr DWORD kStopTimeoutMs = 30000;
 constexpr DWORD kCopyRetryMs = 5000;  // a just-stopped agent may still be unmapping its executable
 
-std::wstring AgentCommand() { return L"\"" + InstallDirectory() + Ipc::kAgentExecutable + L"\""; }
+std::wstring AgentCommand() { return L"\"" + InstallDirectory() + SharedNames::kAgentExecutable + L"\""; }
 
 std::wstring SystemDirectory() {
     wchar_t system[MAX_PATH];
@@ -100,7 +100,7 @@ std::wstring InstallDirectory() {
 }
 
 bool IsInstalled() {
-    return GetFileAttributesW((InstallDirectory() + Ipc::kAgentExecutable).c_str()) != INVALID_FILE_ATTRIBUTES;
+    return GetFileAttributesW((InstallDirectory() + SharedNames::kAgentExecutable).c_str()) != INVALID_FILE_ATTRIBUTES;
 }
 
 bool StartsAtSignIn() {
@@ -110,7 +110,7 @@ bool StartsAtSignIn() {
            _wcsicmp(value, AgentCommand().c_str()) == 0;
 }
 
-bool Disabled() { return CrashGuard(InstallDirectory()).Disabled(); }
+bool DisabledByCrashGuard() { return CrashGuard(InstallDirectory()).Disabled(); }
 
 bool StopAgentAndHooks(const std::wstring& dllPath) {
     if (!AgentClient::RequestStop(kStopTimeoutMs)) {
@@ -122,7 +122,7 @@ bool StopAgentAndHooks(const std::wstring& dllPath) {
         std::optional<DWORD> result = explorer.StopAndUnload(dllPath);
         if (!result || explorer.HasLoaded(dllPath)) {
             Print(L"The hooks are off, but Explorer keeps %s loaded until it restarts (or you sign out).",
-                  Ipc::kHookDll);
+                  SharedNames::kHookDll);
             return false;
         }
     }
@@ -135,13 +135,13 @@ bool Install(const std::wstring& sourceDirectory) {
         Print(L"Couldn't find the folder for per-user programs (%%LOCALAPPDATA%%\\Programs).");
         return false;
     }
-    if (!StopAgentAndHooks(target + Ipc::kHookDll)) {
+    if (!StopAgentAndHooks(target + SharedNames::kHookDll)) {
         Print(L"Couldn't stop the running copy: sign out and in (or restart Explorer), then install again.");
         return false;
     }
     if (_wcsicmp(sourceDirectory.c_str(), target.c_str()) != 0) {
         CreateDirectoryW(target.c_str(), nullptr);
-        for (const wchar_t* file : {kCliExecutable, Ipc::kAgentExecutable, Ipc::kHookDll}) {
+        for (const wchar_t* file : {kCliExecutable, SharedNames::kAgentExecutable, SharedNames::kHookDll}) {
             if (!CopyWithRetry(sourceDirectory + file, target + file)) {
                 Print(L"Copying %s to %s failed (error %lu).", file, target.c_str(), GetLastError());
                 return false;
@@ -155,7 +155,7 @@ bool Install(const std::wstring& sourceDirectory) {
         return false;
     }
     if (!RegisterUninstaller(target)) Print(L"Adding Instant Alt+Tab to Settings > Apps failed; it works anyway.");
-    if (!AgentClient::Launch(target + Ipc::kAgentExecutable)) {
+    if (!AgentClient::Launch(target + SharedNames::kAgentExecutable)) {
         Print(L"Installed, but starting the agent failed (error %lu); it starts at the next sign-in.", GetLastError());
         return false;
     }
@@ -167,7 +167,7 @@ bool Install(const std::wstring& sourceDirectory) {
 
 bool Uninstall(const std::wstring& runningFrom) {
     std::wstring target = InstallDirectory();
-    bool stopped = StopAgentAndHooks(target + Ipc::kHookDll);
+    bool stopped = StopAgentAndHooks(target + SharedNames::kHookDll);
     RegDeleteKeyValueW(HKEY_CURRENT_USER, kRunKey, kRunValue);
     RegDeleteKeyW(HKEY_CURRENT_USER, kUninstallKey);
     if (target.empty() || GetFileAttributesW(target.c_str()) == INVALID_FILE_ATTRIBUTES) {

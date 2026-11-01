@@ -6,7 +6,7 @@
 #include "Console.h"
 #include "../agent/CrashGuard.h"
 #include "../agent/ExplorerProcess.h"
-#include "../shared/Ipc.h"
+#include "../shared/SharedNames.h"
 #include "../shared/TextFile.h"
 
 #include <windows.h>
@@ -51,10 +51,10 @@ bool PrintStatus() {
     Print(L"Starts at sign-in:  %s", Installer::StartsAtSignIn() ? L"yes" : L"no");
     Print(L"Agent:              %s", AgentClient::IsRunning() ? L"running" : L"not running");
     Print(L"Alt+Tab:            %s", altTab);
-    if (Installer::IsInstalled() && Installer::Disabled()) {
+    if (Installer::IsInstalled() && Installer::DisabledByCrashGuard()) {
         Print(L"Turned off after Explorer crashed twice within an hour; install again to turn it back on.");
     }
-    if (std::wstring problem = ReadTextFile(ActiveDirectory() + Ipc::kProblemFile); !problem.empty()) {
+    if (std::wstring problem = ReadTextFile(ActiveDirectory() + SharedNames::kProblemFile); !problem.empty()) {
         Print(L"Why it's stock:     %s", problem.c_str());
     }
     return true;
@@ -66,16 +66,16 @@ bool Start() {
         Print(L"Turned off after Explorer crashed twice within an hour; install again to turn it back on.");
         return false;
     }
-    if (!AgentClient::IsRunning() && !AgentClient::Launch(directory + Ipc::kAgentExecutable)) {
+    if (!AgentClient::IsRunning() && !AgentClient::Launch(directory + SharedNames::kAgentExecutable)) {
         Print(L"Starting the agent failed (error %lu).", GetLastError());
         return false;
     }
-    Print(L"Running. Alt+Tab opens at the usual speed once or twice while it sets up, then instantly.");
+    Print(L"Running. Alt+Tab opens at the usual speed once while it sets up, then instantly.");
     return true;
 }
 
 bool Stop() {
-    bool stopped = Installer::StopAgentAndHooks(ActiveDirectory() + Ipc::kHookDll);
+    bool stopped = Installer::StopAgentAndHooks(ActiveDirectory() + SharedNames::kHookDll);
     if (stopped) Print(L"Stopped. Alt+Tab is back to stock until the agent starts again.");
     return stopped;
 }
@@ -117,7 +117,7 @@ bool Interactive() {
     if (_wcsicmp(here.c_str(), Installer::InstallDirectory().c_str()) != 0) {
         return !Confirm(L"Replace the installed copy with this one?", true) || Installer::Install(here);
     }
-    if (Installer::Disabled()) return !Confirm(L"Turn it back on?", true) || Installer::Install(here);
+    if (Installer::DisabledByCrashGuard()) return !Confirm(L"Turn it back on?", true) || Installer::Install(here);
     return !Confirm(L"Uninstall Instant Alt+Tab?", false) || Installer::Uninstall(here);
 }
 

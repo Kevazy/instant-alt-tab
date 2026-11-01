@@ -1,6 +1,6 @@
 #include "Discovery.h"
 
-#include "Rules.h"
+#include "FindInternals.h"
 
 #include <cstring>
 
@@ -25,8 +25,8 @@ Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath
     }
     AltTab::Internals found;
     try {
-        FindTwinui(*twinui, cacheDirectory, cancel, found.twinui);
-        FindSwitcher(*switcher, found.switcher);
+        FindTwinuiInternals(*twinui, cacheDirectory, cancel, found.twinui);
+        FindSwitcherInternals(*switcher, found.switcher);
     } catch (const RuleFailed& failure) {
         result.error = failure.what;
         result.retryLater = failure.retryLater;

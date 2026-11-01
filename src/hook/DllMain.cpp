@@ -2,11 +2,12 @@
 // thread, passing what discovery found; Stop undoes everything so the agent
 // can unload it again.
 
-#include "CardListUpdates.h"
+#include "QuietCardEdits.h"
 #include "Hooking.h"
-#include "PersistentMenu.h"
+#include "KeptMenu.h"
 #include "../shared/Log.h"
-#include "../shared/Ipc.h"
+#include "../shared/HookExports.h"
+#include "../shared/SharedNames.h"
 
 #include <windows.h>
 
@@ -22,7 +23,7 @@ constexpr DWORD kDrainTimeoutMs = 5000;
 SRWLOCK g_lock = SRWLOCK_INIT;  // Start and Stop never overlap
 bool g_running = false;
 bool g_shutDown = false;  // the hooks' state isn't reset, so this copy has to be reloaded to start again
-DWORD g_stopResult = Ipc::kNotRunning;
+DWORD g_stopResult = HookExports::kNotRunning;
 HANDLE g_hookedMarker = nullptr;
 
 std::wstring ModuleDirectory() {
@@ -43,7 +44,7 @@ void PinModule() {
 // Turns everything off; returns false if code of this DLL may still run.
 bool Shutdown() {
     g_shutDown = true;
-    bool uiThreadDone = PersistentMenu::Stop(kUiThreadTimeoutMs);
+    bool uiThreadDone = KeptMenu::Stop(kUiThreadTimeoutMs);
     DisableHooks();
     return ReleaseHooks(uiThreadDone ? kDrainTimeoutMs : 0) && uiThreadDone;
 }
@@ -54,23 +55,23 @@ DWORD StartHooks(const AltTab::Internals& found) {
     if (!twinui || !switcher) {
         Log(L"not started: the loaded %s isn't the file the agent analysed",
             !twinui ? AltTab::kTwinuiDll : AltTab::kSwitcherDll);
-        return Ipc::kUnsupportedBuild;
+        return HookExports::kUnsupportedBuild;
     }
-    if (!InitializeHooks()) return Ipc::kStartFailed;
-    if (!CardListUpdates::InstallHooks(*switcher, found.switcher) ||
-        !PersistentMenu::InstallHooks(*twinui, *switcher, found)) {
+    if (!InitializeHooks()) return HookExports::kStartFailed;
+    if (!QuietCardEdits::InstallHooks(*switcher, found.switcher) ||
+        !KeptMenu::InstallHooks(*twinui, *switcher, found)) {
         ReleaseHooks(0);  // nothing was enabled
         Log(L"not started: a function's code in memory isn't what the agent analysed, or creating a hook failed");
-        return Ipc::kUnsupportedBuild;
+        return HookExports::kUnsupportedBuild;
     }
-    PersistentMenu::Enable();
+    KeptMenu::Enable();
     if (!EnableHooks()) {
         Log(L"not started: enabling the hooks failed");
         // Some hooks may have been enabled, and one may already have run.
         if (!Shutdown()) PinModule();
-        return Ipc::kStartFailed;
+        return HookExports::kStartFailed;
     }
-    return Ipc::kStarted;
+    return HookExports::kStarted;
 }
 
 }  // namespace
@@ -82,21 +83,22 @@ extern "C" __declspec(dllexport) DWORD WINAPI Start(void* parameter) {
     auto found = static_cast<const AltTab::Internals*>(parameter);
     if (!found || found->magic != AltTab::kInternalsMagic || found->version != AltTab::kInternalsVersion ||
         found->size != sizeof(AltTab::Internals)) {
-        result = Ipc::kStartFailed;  // an agent from another release
+        result = HookExports::kStartFailed;  // an agent from another release
     } else if (g_running) {
-        result = Ipc::kAlreadyRunning;
+        result = HookExports::kAlreadyRunning;
     } else if (g_shutDown) {
-        result = Ipc::kNeedsReload;
+        result = HookExports::kNeedsReload;
     } else {
-        SetLogFile(ModuleDirectory() + L"hook.log");
+        SetLogFile(ModuleDirectory() + SharedNames::kHookLog);
         // Another copy (another path, another version) may already hook this Explorer.
-        g_hookedMarker = CreateEventW(nullptr, TRUE, TRUE, Ipc::HookedMarkerName(GetCurrentProcessId()).c_str());
+        g_hookedMarker =
+            CreateEventW(nullptr, TRUE, TRUE, SharedNames::HookedMarkerName(GetCurrentProcessId()).c_str());
         if (!g_hookedMarker || GetLastError() == ERROR_ALREADY_EXISTS) {
-            result = Ipc::kAlreadyRunning;
+            result = HookExports::kAlreadyRunning;
         } else {
             result = StartHooks(*found);
         }
-        if (result == Ipc::kStarted) {
+        if (result == HookExports::kStarted) {
             g_running = true;
             Log(L"started in Explorer %lu", GetCurrentProcessId());
         } else if (g_hookedMarker) {
@@ -117,11 +119,11 @@ extern "C" __declspec(dllexport) DWORD WINAPI Stop(void*) {
         CloseHandle(g_hookedMarker);
         g_hookedMarker = nullptr;
         if (released) {
-            g_stopResult = Ipc::kStopped;
+            g_stopResult = HookExports::kStopped;
             Log(L"stopped");
         } else {
             PinModule();
-            g_stopResult = Ipc::kStoppedPinned;
+            g_stopResult = HookExports::kStoppedPinned;
             Log(L"stopped; code of this DLL may still run, so it stays loaded until Explorer restarts");
         }
     }

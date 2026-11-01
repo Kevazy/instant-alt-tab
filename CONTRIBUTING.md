@@ -12,11 +12,11 @@ Names follow Microsoft's C++ style, the one used in Windows Terminal and PowerTo
 
 | What | Style | Example |
 |---|---|---|
-| Source files | PascalCase, after the type or module they hold | `PersistentMenu.cpp`, `ExplorerProcess.h` |
+| Source files | PascalCase, after the type or module they hold | `KeptMenu.cpp`, `ExplorerProcess.h` |
 | An executable's entry point | `main.cpp`; the DLL's is `DllMain.cpp` | |
 | Folders | lowercase | `src/discovery` |
 | Namespaces, types, functions | PascalCase | `Discovery::Discover`, `class CrashGuard` |
-| Each part of the program | a namespace named after it; small helpers used everywhere (`Log`, `ReadPointer`) are plain functions | `Discovery::Discover`, `PersistentMenu::InstallHooks` |
+| Each part of the program | a namespace named after it; small helpers used everywhere (`Log`, `ReadPointer`) are plain functions | `Discovery::Discover`, `KeptMenu::InstallHooks` |
 | Locals, parameters, struct fields | camelCase | `hostControl` |
 | Class members | `m_` + camelCase; static ones `s_` | `m_process` |
 | Globals and thread-locals | `g_` and `t_` + camelCase | `g_internals` |
@@ -33,7 +33,7 @@ Comments say why, in plain words. A newcomer should be able to follow the code w
 
 1. Add the field to `src/shared/AltTabInternals.h` and raise `kInternalsVersion`: the agent copies
    that struct into Explorer as is, so its layout is the contract with the hook DLL.
-2. Write the rule in `src/discovery/TwinuiRules.cpp` or `SwitcherRules.cpp`. A rule must match
+2. Write the rule in `src/discovery/FindTwinuiInternals.cpp` or `FindSwitcherInternals.cpp`. A rule must match
    exactly once (`ExactlyOne`); anything else is an error, and the hooks stay off.
 3. Print it in `tools/Discover.cpp`.
 4. Use it in the hook through `g_internals`, and check it at run time where a wrong value could do

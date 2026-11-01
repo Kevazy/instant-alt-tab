@@ -2,9 +2,9 @@
 // the one-time inspection of its visual tree, and the display it was laid out
 // for.
 
-#include "KeptMenu.h"
+#include "KeptMenuState.h"
 
-#include "CardListUpdates.h"
+#include "QuietCardEdits.h"
 #include "../shared/Log.h"
 
 #include <shellscalingapi.h>
@@ -13,7 +13,7 @@
 
 #include <winrt/Windows.UI.Xaml.Media.h>
 
-namespace PersistentMenu {
+namespace KeptMenu {
 namespace {
 
 using GetContentFn = HRESULT(__stdcall*)(IUnknown* window, IUnknown** content);
@@ -83,15 +83,15 @@ xaml::FrameworkElement AsElement(IUnknown* control) {
     return value.as<xaml::FrameworkElement>();
 }
 
-bool ListClosed(IUnknown* list) { return *(reinterpret_cast<BYTE*>(list) + g_listClosed) != 0; }
+bool ListClosed(IUnknown* list) { return *(reinterpret_cast<BYTE*>(list) + g_listClosedOffset) != 0; }
 
 // Whether the host window currently shows `control`, through its own content getter.
 bool HostWindowShows(IUnknown* window, IUnknown* control) {
     if (!window || !control) return false;
-    auto getter = VtableSlot(window, g_internals.hostContentGetterSlot);
-    auto setter = VtableSlot(window, g_internals.hostContentSetterSlot);
-    if (getter != g_twinui.base + g_internals.hostContentGetter ||
-        setter != g_twinui.base + g_internals.hostContentSetter) {
+    auto getter = VtableSlot(window, g_twinuiInternals.hostContentGetterSlot);
+    auto setter = VtableSlot(window, g_twinuiInternals.hostContentSetterSlot);
+    if (getter != g_twinuiImage.base + g_twinuiInternals.hostContentGetter ||
+        setter != g_twinuiImage.base + g_twinuiInternals.hostContentSetter) {
         if (!g_failed) TurnOff(L"the host window's content accessors aren't where discovery found them");
         return false;
     }
@@ -103,7 +103,7 @@ namespace {
 
 // Finds, once per kept menu, what the hooks need from its visual tree.
 // Returns false if the control doesn't show the card list it was kept with.
-bool InspectTree(KeptMenu& kept) {
+bool InspectTree(MenuState& kept) {
     std::vector<xaml::DependencyObject> queue{AsElement(kept.control.get())};
     bool showsList = false, elementTypeFound = false;
     for (size_t i = 0; i < queue.size() && i < kMaxTreeNodes; ++i) {
@@ -133,14 +133,15 @@ bool InspectTree(KeptMenu& kept) {
 // Why the kept menu can't be shown for this opening, or nothing if it can.
 std::optional<std::wstring> ReuseBlocker(void* host, void* display) {
     if (!g_kept) return L"first opening";
-    KeptMenu& kept = *g_kept;
+    MenuState& kept = *g_kept;
     if (!kept.hidden || !kept.hostWindow) return L"previous menu not kept";
     if (!kept.verified) return L"card list not verified";
     if (!g_cardItemOffset) return L"card layout not learned yet";
     if (kept.missedWindow) return L"card list missed a window";
-    if (CardListUpdates::CardVectorOf(kept.list.get()) != kept.cards.get()) return L"card list replaced";
-    if (!SameObject(ComMember(host, g_internals.hostDataSource), kept.dataSource.get())) return L"data source changed";
-    if (!SameObject(ComMember(host, g_internals.hostWindow), kept.hostWindow.get()) ||
+    if (QuietCardEdits::CardVectorOf(kept.list.get()) != kept.cards.get()) return L"card list replaced";
+    if (!SameObject(ComMember(host, g_twinuiInternals.hostDataSource), kept.dataSource.get()))
+        return L"data source changed";
+    if (!SameObject(ComMember(host, g_twinuiInternals.hostWindow), kept.hostWindow.get()) ||
         !HostWindowShows(kept.hostWindow.get(), kept.control.get())) {
         return L"host window changed";
     }
@@ -157,7 +158,7 @@ std::optional<std::wstring> ReuseBlocker(void* host, void* display) {
 // after it was displayed), notes the display it's laid out for, and scrolls it
 // back to the top, where a new menu always opens.
 void TidyHiddenMenu() {
-    KeptMenu& kept = *g_kept;
+    MenuState& kept = *g_kept;
     if (!kept.displayed) return;
     try {
         if (!kept.inspected) {
@@ -197,7 +198,7 @@ bool IsKeptCardContainer(IInspectable* root) {
 // The kept menu is on screen: a new one once it has loaded, a reused one at
 // the end of Show.
 void OnKeptMenuDisplayed() {
-    KeptMenu& kept = *g_kept;
+    MenuState& kept = *g_kept;
     kept.hidden = false;
     kept.displayed = true;
     if (HWND window = MenuWindowInForeground()) kept.window = window;
@@ -208,7 +209,7 @@ void OnKeptMenuDisplayed() {
 }
 
 bool ShowsKeptMenu(void* host) {
-    return g_kept && SameObject(ComMember(host, g_internals.hostControl), g_kept->control.get());
+    return g_kept && SameObject(ComMember(host, g_twinuiInternals.hostControl), g_kept->control.get());
 }
 
-}  // namespace PersistentMenu
+}  // namespace KeptMenu

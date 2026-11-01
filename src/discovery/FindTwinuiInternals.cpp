@@ -1,7 +1,7 @@
 // twinui.pcshell.dll: functions by their public symbol names; member offsets
 // and vtable slots from what those functions do with their parameters.
 
-#include "Rules.h"
+#include "FindInternals.h"
 #include "Symbols.h"
 
 #include <cstring>
@@ -97,8 +97,8 @@ uint32_t SlotCalledBy(const PeFile& file, uint32_t wrapper, int depth, const wch
 
 }  // namespace
 
-void FindTwinui(const PeFile& file, const std::wstring& cacheDirectory, HANDLE cancel,
-                AltTab::TwinuiInternals& twinui) {
+void FindTwinuiInternals(const PeFile& file, const std::wstring& cacheDirectory, HANDLE cancel,
+                         AltTab::TwinuiInternals& twinui) {
     Names names(file, cacheDirectory, cancel);
     twinui.createControl = FunctionAt(file, names.One(kCreateControl), L"CreateAltTabControl");
     twinui.show = FunctionAt(file, names.One(kShow), L"Show");

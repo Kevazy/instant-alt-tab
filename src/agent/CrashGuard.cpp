@@ -1,5 +1,7 @@
 #include "CrashGuard.h"
 
+#include "../shared/SharedNames.h"
+
 #include <algorithm>
 #include <cstdio>
 #include <string_view>
@@ -17,7 +19,7 @@ ULONGLONG NowMs() {
 
 }  // namespace
 
-CrashGuard::CrashGuard(const std::wstring& directory) : m_path(directory + L"crash-guard.txt") {}
+CrashGuard::CrashGuard(const std::wstring& directory) : m_path(directory + SharedNames::kCrashGuardFile) {}
 
 bool CrashGuard::Disabled() const { return Read().disabled; }
 

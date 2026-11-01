@@ -13,7 +13,7 @@
 
 #include <span>
 
-namespace CardListUpdates {
+namespace QuietCardEdits {
 
 bool InstallHooks(const ModuleImage& switcher, const AltTab::SwitcherInternals& found);
 
@@ -31,4 +31,4 @@ unsigned SortCount();
 // null for none. Other lists (fresh menus, Task View) are left to the switcher.
 void SetQuietVector(void* cardVector);
 
-}  // namespace CardListUpdates
+}  // namespace QuietCardEdits

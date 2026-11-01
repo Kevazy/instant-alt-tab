@@ -27,7 +27,8 @@ T ExactlyOne(const wchar_t* what, const std::set<T>& found) {
 // A function and its entry bytes, which must be code in the file.
 AltTab::FunctionLocation FunctionAt(const PeFile& file, uint32_t rva, const wchar_t* what);
 
-void FindTwinui(const PeFile& file, const std::wstring& cacheDirectory, HANDLE cancel, AltTab::TwinuiInternals& twinui);
-void FindSwitcher(const PeFile& file, AltTab::SwitcherInternals& switcher);
+void FindTwinuiInternals(const PeFile& file, const std::wstring& cacheDirectory, HANDLE cancel,
+                         AltTab::TwinuiInternals& twinui);
+void FindSwitcherInternals(const PeFile& file, AltTab::SwitcherInternals& switcher);
 
 }  // namespace Discovery

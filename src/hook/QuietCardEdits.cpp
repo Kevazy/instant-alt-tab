@@ -1,4 +1,4 @@
-#include "CardListUpdates.h"
+#include "QuietCardEdits.h"
 
 #include "../shared/Log.h"
 
@@ -6,7 +6,7 @@
 #include <cstdint>
 #include <vector>
 
-namespace CardListUpdates {
+namespace QuietCardEdits {
 namespace {
 
 using ListFn = void* (*)(void* list, void*, void*, void*);
@@ -18,17 +18,17 @@ constexpr unsigned kCollectionReset = 0;     // Windows.Foundation.Collections.C
 constexpr size_t kMaxReplayCards = 2048;     // beyond this a single Reset is cheaper than diffing
 constexpr size_t kMaxPlausibleCards = 8192;  // far more windows than a session has: a bigger "vector" isn't one
 
-ModuleImage g_switcher;
-AltTab::SwitcherInternals g_internals;  // what discovery found in it
-ListFn g_syncList, g_sortList;
-RemoveAtFn g_removeAt;
-InsertAtFn g_insertAt;
-NotifyFn g_notify;
+ModuleImage g_switcherImage;
+AltTab::SwitcherInternals g_switcherInternals;  // what discovery found in it
+ListFn g_originalSyncList, g_originalSortList;
+RemoveAtFn g_originalRemoveAt;
+InsertAtFn g_originalInsertAt;
+NotifyFn g_originalNotify;
 std::atomic<void*> g_quietVector{nullptr};
 thread_local void* t_lastSortedList = nullptr;
 thread_local unsigned t_sortCount = 0;
 
-BYTE& Observed(void* vector) { return *(static_cast<BYTE*>(vector) + g_internals.vectorObserved); }
+BYTE& Observed(void* vector) { return *(static_cast<BYTE*>(vector) + g_switcherInternals.vectorObserved); }
 
 // The cards in a vector at one moment, each with a reference held.
 class Snapshot {
@@ -86,17 +86,17 @@ bool ReplayMinimalEdits(void* vector, const Snapshot& before, const Snapshot& af
     const auto& to = after.cards();
     if (from.size() > kMaxReplayCards || to.size() > kMaxReplayCards) return false;
 
-    for (size_t i = to.size(); i-- > 0;) g_removeAt(vector, static_cast<unsigned>(i));
-    for (size_t i = 0; i < from.size(); ++i) g_insertAt(vector, static_cast<unsigned>(i), from[i]);
+    for (size_t i = to.size(); i-- > 0;) g_originalRemoveAt(vector, static_cast<unsigned>(i));
+    for (size_t i = 0; i < from.size(); ++i) g_originalInsertAt(vector, static_cast<unsigned>(i), from[i]);
     Observed(vector) = 1;
 
     std::vector<bool> keepFrom, keepTo;
     LongestCommonSubsequence(from, to, keepFrom, keepTo);
     for (size_t i = from.size(); i-- > 0;) {
-        if (!keepFrom[i]) g_removeAt(vector, static_cast<unsigned>(i));
+        if (!keepFrom[i]) g_originalRemoveAt(vector, static_cast<unsigned>(i));
     }
     for (size_t j = 0; j < to.size(); ++j) {
-        if (!keepTo[j]) g_insertAt(vector, static_cast<unsigned>(j), to[j]);
+        if (!keepTo[j]) g_originalInsertAt(vector, static_cast<unsigned>(j), to[j]);
     }
     return Snapshot(vector) == after;
 }
@@ -117,7 +117,7 @@ void* EditQuietly(void* list, Edit&& edit) {
         result = edit();
     } catch (...) {
         Observed(vector) = 1;
-        g_notify(vector, kCollectionReset, 0);
+        g_originalNotify(vector, kCollectionReset, 0);
         throw;
     }
     Snapshot after(vector);
@@ -131,7 +131,7 @@ void* EditQuietly(void* list, Edit&& edit) {
     }
     Observed(vector) = 1;
     if (!consistent) {
-        g_notify(vector, kCollectionReset, 0);  // XAML rebuilds from the vector as it is
+        g_originalNotify(vector, kCollectionReset, 0);  // XAML rebuilds from the vector as it is
         Log(L"card list replay did not reproduce the list; sent a reset");
     }
     return result;
@@ -139,36 +139,36 @@ void* EditQuietly(void* list, Edit&& edit) {
 
 void* SyncListHook(void* list, void* a, void* b, void* c) {
     HookScope scope;
-    return EditQuietly(list, [&] { return g_syncList(list, a, b, c); });
+    return EditQuietly(list, [&] { return g_originalSyncList(list, a, b, c); });
 }
 
 void* SortListHook(void* list, void* a, void* b, void* c) {
     HookScope scope;
     t_lastSortedList = list;
     ++t_sortCount;
-    return EditQuietly(list, [&] { return g_sortList(list, a, b, c); });
+    return EditQuietly(list, [&] { return g_originalSortList(list, a, b, c); });
 }
 
 }  // namespace
 
 bool InstallHooks(const ModuleImage& switcher, const AltTab::SwitcherInternals& found) {
-    g_switcher = switcher;
-    g_internals = found;
+    g_switcherImage = switcher;
+    g_switcherInternals = found;
     if (!EntryMatches(switcher, found.vectorRemoveAt) || !EntryMatches(switcher, found.vectorInsertAt) ||
         !EntryMatches(switcher, found.vectorNotify)) {
         return false;
     }
-    g_removeAt = switcher.At<RemoveAtFn>(found.vectorRemoveAt.rva);
-    g_insertAt = switcher.At<InsertAtFn>(found.vectorInsertAt.rva);
-    g_notify = switcher.At<NotifyFn>(found.vectorNotify.rva);
-    return CreateHook(switcher, found.syncList, &SyncListHook, &g_syncList) &&
-           CreateHook(switcher, found.sortList, &SortListHook, &g_sortList);
+    g_originalRemoveAt = switcher.At<RemoveAtFn>(found.vectorRemoveAt.rva);
+    g_originalInsertAt = switcher.At<InsertAtFn>(found.vectorInsertAt.rva);
+    g_originalNotify = switcher.At<NotifyFn>(found.vectorNotify.rva);
+    return CreateHook(switcher, found.syncList, &SyncListHook, &g_originalSyncList) &&
+           CreateHook(switcher, found.sortList, &SortListHook, &g_originalSortList);
 }
 
 void* CardVectorOf(void* list) {
-    void* vector = list ? ReadPointer(list, g_internals.listCards) : nullptr;
-    if (!vector || !g_switcher.Contains(ReadPointer(vector, 0))) return nullptr;  // vtable in the switcher
-    void* storage = ReadPointer(vector, g_internals.vectorStorage);
+    void* vector = list ? ReadPointer(list, g_switcherInternals.listCards) : nullptr;
+    if (!vector || !g_switcherImage.Contains(ReadPointer(vector, 0))) return nullptr;  // vtable in the switcher
+    void* storage = ReadPointer(vector, g_switcherInternals.vectorStorage);
     auto begin = static_cast<BYTE*>(storage ? ReadPointer(storage, 0) : nullptr);
     auto end = static_cast<BYTE*>(storage ? ReadPointer(storage, sizeof(void*)) : nullptr);
     bool sane = begin && end >= begin && static_cast<size_t>(end - begin) <= kMaxPlausibleCards * sizeof(void*);
@@ -176,7 +176,7 @@ void* CardVectorOf(void* list) {
 }
 
 std::span<IInspectable* const> Cards(void* cardVector) {
-    auto storage = static_cast<IInspectable** const*>(ReadPointer(cardVector, g_internals.vectorStorage));
+    auto storage = static_cast<IInspectable** const*>(ReadPointer(cardVector, g_switcherInternals.vectorStorage));
     if (!storage || !storage[0]) return {};
     return {storage[0], storage[1]};
 }
@@ -187,4 +187,4 @@ unsigned SortCount() { return t_sortCount; }
 
 void SetQuietVector(void* cardVector) { g_quietVector = cardVector; }
 
-}  // namespace CardListUpdates
+}  // namespace QuietCardEdits

@@ -2,9 +2,9 @@
 // previous opening left it, so its first move is reset to where a new menu
 // would start; see NavigateToItemHook.
 
-#include "KeptMenu.h"
+#include "KeptMenuState.h"
 
-#include "CardListUpdates.h"
+#include "QuietCardEdits.h"
 #include "../shared/Log.h"
 
 #include <array>
@@ -12,7 +12,7 @@
 
 #include <winrt/Windows.UI.Xaml.Input.h>
 
-namespace PersistentMenu {
+namespace KeptMenu {
 namespace {
 
 // clang-format off
@@ -20,8 +20,8 @@ using NavigateToItemFn = HRESULT(*)(IUnknown* control, IUnknown* item);
 using NavigateFn = HRESULT(*)(IUnknown* control, bool backward);
 // clang-format on
 
-NavigateToItemFn g_navigateToItem;
-NavigateFn g_navigate;
+NavigateToItemFn g_originalNavigateToItem;
+NavigateFn g_originalNavigate;
 
 constexpr size_t kCardScanBytes = 0x200;     // how far into a card its item is looked for
 std::array<void*, 2> g_navigationTargets{};  // the control's NavigateToItem and Navigate, once hooked
@@ -30,14 +30,14 @@ thread_local bool t_selectingFirstCard = false;
 com_ptr<IUnknown> SwitchItemOf(IInspectable* card) {
     com_ptr<IUnknown> item;
     auto field = g_cardItemOffset ? static_cast<IUnknown*>(ReadPointer(card, g_cardItemOffset)) : nullptr;
-    if (LooksLikeComObject(field)) field->QueryInterface(g_internals.switchItem, item.put_void());
+    if (LooksLikeComObject(field)) field->QueryInterface(g_twinuiInternals.switchItem, item.put_void());
     return item;
 }
 
 // How many cards hold `item` where cards keep their item.
 size_t CardsHolding(IUnknown* item) {
     size_t holders = 0;
-    for (IInspectable* card : CardListUpdates::Cards(g_kept->cards.get())) {
+    for (IInspectable* card : QuietCardEdits::Cards(g_kept->cards.get())) {
         holders += ReadPointer(card, g_cardItemOffset) == item;
     }
     return holders;
@@ -47,14 +47,14 @@ size_t CardsHolding(IUnknown* item) {
 // card may hold that pointer, at exactly one offset.
 void LearnCardItemOffset(IUnknown* item) {
     com_ptr<IUnknown> switchItem;
-    item->QueryInterface(g_internals.switchItem, switchItem.put_void());
+    item->QueryInterface(g_twinuiInternals.switchItem, switchItem.put_void());
     if (switchItem.get() != item) {
         Log(L"Show's item isn't a card's ISwitchItem; menus aren't kept");
         return;
     }
     std::set<size_t> offsets;
     size_t holders = 0;
-    for (IInspectable* card : CardListUpdates::Cards(g_kept->cards.get())) {
+    for (IInspectable* card : QuietCardEdits::Cards(g_kept->cards.get())) {
         bool holds = false;
         for (size_t offset = sizeof(void*); offset < kCardScanBytes; offset += sizeof(void*)) {
             if (ReadPointer(card, offset) == item) {
@@ -85,14 +85,15 @@ HRESULT NavigateHook(IUnknown* control, bool backward);
 // holding exactly the pointer the factory returned, in the first opening that
 // builds a menu. Later controls must have the same ones.
 bool HookNavigation(IUnknown* control) {
-    std::array<void*, 2> targets{VtableSlot(control, g_internals.navigateToItemSlot),
-                                 VtableSlot(control, g_internals.navigateSlot)};
+    std::array<void*, 2> targets{VtableSlot(control, g_twinuiInternals.navigateToItemSlot),
+                                 VtableSlot(control, g_twinuiInternals.navigateSlot)};
     if (g_navigationTargets[0]) return targets == g_navigationTargets;
-    if (!IsCode(g_switcher, targets[0]) || !IsCode(g_switcher, targets[1]) || targets[0] == targets[1]) return false;
+    if (!IsCode(g_switcherImage, targets[0]) || !IsCode(g_switcherImage, targets[1]) || targets[0] == targets[1])
+        return false;
     // A Stop on another thread disables all hooks; none may be enabled after it.
     AcquireSRWLockExclusive(&g_uiThreadLock);
-    bool hooked = !g_stopping && HookNow(targets[0], &NavigateToItemHook, &g_navigateToItem);
-    hooked = hooked && HookNow(targets[1], &NavigateHook, &g_navigate);
+    bool hooked = !g_stopping && HookNow(targets[0], &NavigateToItemHook, &g_originalNavigateToItem);
+    hooked = hooked && HookNow(targets[1], &NavigateHook, &g_originalNavigate);
     ReleaseSRWLockExclusive(&g_uiThreadLock);
     if (hooked) g_navigationTargets = targets;
     return hooked;
@@ -104,11 +105,11 @@ size_t g_cardItemOffset = 0;
 
 // Moves the selection to the first card through the control's own NavigateToItem.
 void SelectFirstCard(IUnknown* control) {
-    auto cards = CardListUpdates::Cards(g_kept->cards.get());
+    auto cards = QuietCardEdits::Cards(g_kept->cards.get());
     if (cards.empty() || !control) return;
     com_ptr<IUnknown> item = SwitchItemOf(cards.front());
     if (!item) return;
-    auto navigate = static_cast<NavigateToItemFn>(VtableSlot(control, g_internals.navigateToItemSlot));
+    auto navigate = static_cast<NavigateToItemFn>(VtableSlot(control, g_twinuiInternals.navigateToItemSlot));
     t_selectingFirstCard = true;
     HRESULT hr = navigate(control, item.get());
     t_selectingFirstCard = false;
@@ -135,7 +136,7 @@ void ShowSelectionAsKeyboardFocus() {
 void ConfirmBuiltControl(Opening& opening) {
     if (opening.confirmed || !opening.built || opening.cancelled || !g_kept || g_kept->control != opening.built) return;
     opening.confirmed = true;
-    if (ReadPointer(opening.host, g_internals.hostControl) != opening.built.get()) {
+    if (ReadPointer(opening.host, g_twinuiInternals.hostControl) != opening.built.get()) {
         TurnOff(L"the host doesn't hold its control where discovery found it");
     } else if (!HookNavigation(opening.built.get())) {
         TurnOff(L"the control's navigation isn't the one hooked before");
@@ -169,7 +170,7 @@ HRESULT NavigateToItemHook(IUnknown* control, IUnknown* item) {
         }
         if (opening->firstNavigation == FirstNavigation::None) opening->firstNavigation = FirstNavigation::ToItem;
     }
-    HRESULT hr = g_navigateToItem(control, item);
+    HRESULT hr = g_originalNavigateToItem(control, item);
     if (IsKeptControl(control)) ShowSelectionAsKeyboardFocus();
     return hr;
 }
@@ -181,10 +182,10 @@ HRESULT NavigateHook(IUnknown* control, bool backward) {
         opening->firstNavigation = backward ? FirstNavigation::Backward : FirstNavigation::Forward;
         if (backward && opening->reused) SelectFirstCard(control);
     }
-    HRESULT hr = g_navigate(control, backward);
+    HRESULT hr = g_originalNavigate(control, backward);
     if (IsKeptControl(control)) ShowSelectionAsKeyboardFocus();
     return hr;
 }
 
 }  // namespace
-}  // namespace PersistentMenu
+}  // namespace KeptMenu

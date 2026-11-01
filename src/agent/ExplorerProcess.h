@@ -38,7 +38,7 @@ public:
     // Whether this copy (by full path) is loaded.
     bool HasLoaded(const std::wstring& dllPath) const;
 
-    // The results below are Ipc::StartResult / StopResult values, 0 if the
+    // The results below are HookExports::StartResult / StopResult values, 0 if the
     // DLL couldn't be loaded, or nullopt if a call into Explorer didn't return
     // in time. Its code may then still be running, so nothing is freed or
     // unloaded and that copy must be left alone until Explorer exits.

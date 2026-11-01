@@ -1,11 +1,11 @@
 #include "AgentClient.h"
 
-#include "../shared/Ipc.h"
+#include "../shared/SharedNames.h"
 
 namespace AgentClient {
 
 bool IsRunning() {
-    HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, Ipc::kAgentMutex);
+    HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, SharedNames::kAgentMutex);
     if (mutex) CloseHandle(mutex);
     return mutex != nullptr;
 }
@@ -25,13 +25,13 @@ bool Launch(const std::wstring& agentExecutable) {
 }
 
 bool RequestStop(DWORD timeoutMs) {
-    HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, Ipc::kAgentMutex);
+    HANDLE mutex = OpenMutexW(SYNCHRONIZE, FALSE, SharedNames::kAgentMutex);
     if (!mutex) return true;  // not running
     // The agent owns the mutex until it exits. The event is set again while
     // waiting, in case the agent was still starting up and hadn't created it yet.
     bool stopped = false;
     for (DWORD waited = 0; !stopped && waited <= timeoutMs; waited += 250) {
-        if (HANDLE stop = OpenEventW(EVENT_MODIFY_STATE, FALSE, Ipc::kAgentStopEvent)) {
+        if (HANDLE stop = OpenEventW(EVENT_MODIFY_STATE, FALSE, SharedNames::kAgentStopEvent)) {
             SetEvent(stop);
             CloseHandle(stop);
         }
