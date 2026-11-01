@@ -41,15 +41,18 @@ HWND MenuWindowInForeground() {
 std::optional<DisplayContext> ReadContext(void* display, HWND menuWindow) {
     DisplayContext c;
     c.display = display;
-    c.monitor = menuWindow ? MonitorFromWindow(menuWindow, MONITOR_DEFAULTTOPRIMARY)
-                           : MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
-    MONITORINFO info{sizeof(info)};
+    HMONITOR monitor = menuWindow ? MonitorFromWindow(menuWindow, MONITOR_DEFAULTTOPRIMARY)
+                                  : MonitorFromPoint({0, 0}, MONITOR_DEFAULTTOPRIMARY);
+    MONITORINFOEXW info{};
+    info.cbSize = sizeof(info);
     UINT dpiY = 0;
     HIGHCONTRASTW contrast{sizeof(contrast)};
-    if (!GetMonitorInfoW(c.monitor, &info) || FAILED(GetDpiForMonitor(c.monitor, MDT_EFFECTIVE_DPI, &c.dpi, &dpiY)) ||
+    if (!GetMonitorInfoW(monitor, &info) || FAILED(GetDpiForMonitor(monitor, MDT_EFFECTIVE_DPI, &c.dpi, &dpiY)) ||
         !SystemParametersInfoW(SPI_GETHIGHCONTRAST, sizeof(contrast), &contrast, 0)) {
         return std::nullopt;
     }
+    c.monitor = info.szDevice;
+    c.monitorBounds = info.rcMonitor;
     c.workArea = info.rcWork;
     c.highContrast = contrast.dwFlags & HCF_HIGHCONTRASTON;
     c.windowColor = GetSysColor(COLOR_WINDOW);
@@ -66,7 +69,7 @@ std::optional<DisplayContext> ReadContext(void* display, HWND menuWindow) {
 std::wstring ContextChanges(const DisplayContext& a, const DisplayContext& b) {
     std::wstring changes;
     if (a.display != b.display) changes += L" display";
-    if (a.monitor != b.monitor) changes += L" monitor";
+    if (a.monitor != b.monitor || !EqualRect(&a.monitorBounds, &b.monitorBounds)) changes += L" monitor";
     if (!EqualRect(&a.workArea, &b.workArea)) changes += L" work-area";
     if (a.dpi != b.dpi) changes += L" dpi";
     if (a.appsLightTheme != b.appsLightTheme || a.systemLightTheme != b.systemLightTheme) changes += L" theme";
@@ -203,8 +206,11 @@ void OnKeptMenuDisplayed() {
     kept.displayed = true;
     if (HWND window = MenuWindowInForeground()) kept.window = window;
     // Windows chose another monitor than the one the menu was laid out for.
-    if (kept.context && kept.window && MonitorFromWindow(kept.window, MONITOR_DEFAULTTONULL) != kept.context->monitor) {
-        kept.movedDisplay = true;
+    if (kept.context && kept.window) {
+        MONITORINFOEXW info{};
+        info.cbSize = sizeof(info);
+        HMONITOR now = MonitorFromWindow(kept.window, MONITOR_DEFAULTTONULL);
+        if (!now || !GetMonitorInfoW(now, &info) || kept.context->monitor != info.szDevice) kept.movedDisplay = true;
     }
 }
 

@@ -184,10 +184,17 @@ void FindSwitcherInternals(const PeFile& file, AltTab::SwitcherInternals& switch
     switcher.vectorStorage = FindStorage(file, vector.removeAt);
     switcher.syncList = FunctionAt(file, vector.sync, L"card list re-sync");
     switcher.listCards = vector.cards;
-    switcher.sortList = FunctionAt(file, FindSort(file, code, vector), L"card list sort");
     auto [close, closed] = FindCloseList(file, code);
+    // The close flag and the card vector are members of one list object, so a
+    // flag inside the vector's pointer means the rules found two different
+    // objects (as in 24H2 builds before November 2024, whose card list worked
+    // differently and has no sort to find).
+    if (closed >= vector.cards && closed < vector.cards + sizeof(void*)) {
+        throw RuleFailed{L"card list: its close flag lies inside its card vector member, so they can't be one object"};
+    }
     switcher.closeList = FunctionAt(file, close, L"card list close");
     switcher.listClosed = closed;
+    switcher.sortList = FunctionAt(file, FindSort(file, code, vector), L"card list sort");
     switcher.findDescendant = FunctionAt(file, FindDescendantSearch(file, code), L"descendant search");
 }
 

@@ -29,7 +29,10 @@ using winrt::com_ptr;
 // What a kept menu was laid out for. Any difference rebuilds it.
 struct DisplayContext {
     void* display = nullptr;  // Show's display argument, compared by identity
-    HMONITOR monitor = nullptr;
+    // The monitor by its device name (\\.\DISPLAY1) and bounds, not its handle:
+    // Windows hands out new handles when monitors wake from sleep.
+    std::wstring monitor;
+    RECT monitorBounds{};
     RECT workArea{};
     UINT dpi = 0;
     DWORD appsLightTheme = 1, systemLightTheme = 1;

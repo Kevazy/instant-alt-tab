@@ -221,7 +221,14 @@ HRESULT ShowHook(void* host, void* display, int flags, void* view) {
         return hr;
     }
     // Normally confirmed in GetItemForViewHook already; this covers a Show that doesn't call it.
+    bool confirmedDuringShow = opening.confirmed;
     ConfirmBuiltControl(opening);
+    if (opening.built && !g_cardItemOffset) {
+        static constexpr const wchar_t* kMoves[] = {L"none", L"to the foreground window's card", L"forward",
+                                                    L"backward"};
+        Log(L"card layout not learned in this opening (navigation hooked %s Show; first move: %s)",
+            confirmedDuringShow ? L"during" : L"after", kMoves[static_cast<int>(opening.firstNavigation)]);
+    }
     // Show moved forward from the kept selection: start where a new menu starts instead.
     if (opening.reused && !opening.cancelled && opening.firstNavigation == FirstNavigation::Forward) {
         SelectFirstCard(ComMember(host, g_twinuiInternals.hostControl));
