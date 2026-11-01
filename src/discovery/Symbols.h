@@ -19,6 +19,7 @@ struct Symbols {
     std::map<std::wstring, std::vector<uint32_t>> rvas;  // every requested name; empty if the PDB doesn't have it
     std::wstring error;                                  // empty on success
     bool retryLater = false;                             // the download failed; it may work later
+    bool notPublished = false;  // the server doesn't have them; Microsoft may publish them days later
 };
 
 // `cancel`, if set, stops a download in progress.

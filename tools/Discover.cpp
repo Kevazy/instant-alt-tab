@@ -79,6 +79,9 @@ int wmain(int argc, wchar_t** argv) {
     wprintf(L"%-28s %s\n", L"switchItem", id);
     StringFromGUID2(t.switchItemDataSource, id, 40);
     wprintf(L"%-28s %s\n", L"switchItemDataSource", id);
+    wprintf(L"%-28s", L"switchItemVtables");
+    for (uint32_t rva : t.switchItemVtables) wprintf(L" 0x%x", rva);
+    wprintf(L"\n");
     Print(L"switcher.timeDateStamp", s.module.timeDateStamp);
     Print(L"switcher.sizeOfImage", s.module.sizeOfImage);
     Print(L"syncList", s.syncList);

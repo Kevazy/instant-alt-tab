@@ -7,7 +7,9 @@
 
 #include <intrin.h>
 
+#include <algorithm>
 #include <cstring>
+#include <iterator>
 
 extern "C" IMAGE_DOS_HEADER __ImageBase;
 
@@ -223,6 +225,9 @@ HRESULT ShowHook(void* host, void* display, int flags, void* view) {
     // Normally confirmed in GetItemForViewHook already; this covers a Show that doesn't call it.
     bool confirmedDuringShow = opening.confirmed;
     ConfirmBuiltControl(opening);
+    if (opening.built && !g_cardItemOffset && g_kept && g_kept->control == opening.built) {
+        LearnCardItemOffsetFromItemClass();
+    }
     if (opening.built && !g_cardItemOffset) {
         static constexpr const wchar_t* kMoves[] = {L"none", L"to the foreground window's card", L"forward",
                                                     L"backward"};
@@ -413,6 +418,15 @@ bool InstallHooks(const ModuleImage& twinui, const ModuleImage& switcher, const 
     int32_t displacement;
     std::memcpy(&displacement, call + 1, sizeof(displacement));
     if (call + 5 + displacement != twinui.base + g_twinuiInternals.registerRoot.rva) return false;
+    // The item class's vtables are read-only data in twinui, or they aren't used.
+    for (uint32_t rva : g_twinuiInternals.switchItemVtables) {
+        if (rva && (!twinui.Contains(twinui.base + rva) || IsCode(twinui, twinui.base + rva))) {
+            std::fill(std::begin(g_twinuiInternals.switchItemVtables), std::end(g_twinuiInternals.switchItemVtables),
+                      0);
+            Log(L"the item class's vtables aren't where discovery found them; not used");
+            break;
+        }
+    }
     bool hooked =
         CreateHook(twinui, g_twinuiInternals.show, &ShowHook, &g_originalShow) &&
         CreateHook(twinui, g_twinuiInternals.createControl, &CreateControlHook, &g_originalCreateControl) &&

@@ -72,6 +72,16 @@ void LearnCardItemOffset(IUnknown* item) {
     }
 }
 
+// Whether `object` is a SwitchItem, by its vtable: nothing is called on it.
+bool IsSwitchItem(const void* object) {
+    void* vtable = object ? ReadPointer(object, 0) : nullptr;
+    if (!vtable) return false;
+    for (uint32_t rva : g_twinuiInternals.switchItemVtables) {
+        if (rva && vtable == g_twinuiImage.base + rva) return true;
+    }
+    return false;
+}
+
 bool IsKeptControl(IUnknown* control) {
     return g_enabled && GetCurrentThreadId() == g_uiThread && g_kept && g_kept->control.get() == control;
 }
@@ -102,6 +112,41 @@ bool HookNavigation(IUnknown* control) {
 }  // namespace
 
 size_t g_cardItemOffset = 0;
+
+// Learns where cards keep their item when Show selected no window to learn it
+// from, as in the first opening after Explorer starts, before Windows' window
+// list is filled: every card must hold a SwitchItem (recognized by its vtable)
+// at one and the same offset, and it must be the item's ISwitchItem interface.
+void LearnCardItemOffsetFromItemClass() {
+    auto cards = QuietCardEdits::Cards(g_kept->cards.get());
+    if (cards.empty() || !g_twinuiInternals.switchItemVtables[0]) return;
+    std::set<size_t> offsets;
+    size_t holders = 0;
+    for (IInspectable* card : cards) {
+        bool holds = false;
+        for (size_t offset = sizeof(void*); offset < kCardScanBytes; offset += sizeof(void*)) {
+            if (IsSwitchItem(ReadPointer(card, offset))) {
+                offsets.insert(offset);
+                holds = true;
+            }
+        }
+        holders += holds;
+    }
+    if (holders != cards.size() || offsets.size() != 1) {
+        Log(L"couldn't tell where cards keep their item from its class (%zu of %zu cards hold one, at %zu offsets)",
+            holders, cards.size(), offsets.size());
+        return;
+    }
+    auto object = static_cast<IUnknown*>(ReadPointer(cards.front(), *offsets.begin()));
+    com_ptr<IUnknown> item;
+    object->QueryInterface(g_twinuiInternals.switchItem, item.put_void());
+    if (item.get() != object) {
+        Log(L"the SwitchItem cards hold isn't their ISwitchItem; card layout not learned");
+        return;
+    }
+    g_cardItemOffset = *offsets.begin();
+    Log(L"cards keep their item at +0x%zx (found from the item class)", g_cardItemOffset);
+}
 
 // Moves the selection to the first card through the control's own NavigateToItem.
 void SelectFirstCard(IUnknown* control) {

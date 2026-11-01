@@ -126,6 +126,9 @@ bool ShowsKeptMenu(void* host);
 void ConfirmBuiltControl(Opening& opening);
 // Moves the selection to the first card through the control's own NavigateToItem.
 void SelectFirstCard(IUnknown* control);
+// Learns where cards keep their item from the item class, when Show selected
+// no window (see MenuSelection.cpp).
+void LearnCardItemOffsetFromItemClass();
 // Leaves the kept menu's selected card with keyboard focus, as a new menu has it.
 void ShowSelectionAsKeyboardFocus();
 

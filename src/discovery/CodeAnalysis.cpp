@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <iterator>
+#include <map>
 
 namespace Discovery {
 
@@ -124,7 +125,17 @@ std::vector<Step> Walk(const PeFile& file, uint32_t start, std::optional<uint32_
     }
     std::vector<Step> steps;
     uint32_t limit = end.value_or(start + static_cast<uint32_t>(kMaxUnboundedWalk));
+    // What the registers held at forward branches, by target. Code right after
+    // an unconditional jump or a return is reached only through branches, so it
+    // starts from their state (registers they disagree on are unknown) instead
+    // of the unrelated code above it.
+    std::map<uint32_t, std::array<Value, kRegisters>> branchedTo;
+    bool fallsThrough = true;
     for (uint32_t rva = start; rva < limit && steps.size() < maxSteps;) {
+        if (auto joined = branchedTo.find(rva); joined != branchedTo.end()) {
+            if (!fallsThrough) registers = joined->second;
+            branchedTo.erase(joined);
+        }
         auto bytes = file.Read(rva, std::min<size_t>(ZYDIS_MAX_INSTRUCTION_LENGTH, limit - rva));
         ZydisDecodedInstruction instruction;
         ZydisDecodedOperand operands[ZYDIS_MAX_OPERAND_COUNT];
@@ -175,6 +186,15 @@ std::vector<Step> Walk(const PeFile& file, uint32_t start, std::optional<uint32_
         if (step.call) {
             for (Register clobbered : {kRax, kRcx, kRdx, kR8, kR9, kR10, kR11}) registers[clobbered] = Value{};
         }
+        if ((step.jump || step.conditionalJump) && step.target && *step.target > rva && *step.target < limit) {
+            auto [at, added] = branchedTo.try_emplace(*step.target, step.before);
+            if (!added) {
+                for (int i = 0; i < kRegisters; ++i) {
+                    if (at->second[i] != step.before[i]) at->second[i] = Value{};
+                }
+            }
+        }
+        fallsThrough = !(step.jump || step.ret);
         steps.push_back(step);
         rva += instruction.length;
         if (!end && (step.ret || step.jump)) break;

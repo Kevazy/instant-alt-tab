@@ -30,6 +30,7 @@ Result Discover(const std::wstring& twinuiPath, const std::wstring& switcherPath
     } catch (const RuleFailed& failure) {
         result.error = failure.what;
         result.retryLater = failure.retryLater;
+        result.notPublished = failure.notPublished;
         return result;
     }
     found.twinui.module = {twinui->TimeDateStamp(), twinui->SizeOfImage()};

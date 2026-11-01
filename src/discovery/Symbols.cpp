@@ -76,7 +76,7 @@ struct InternetHandle {
     }
 };
 
-std::wstring Download(const std::wstring& path, const std::wstring& to, HANDLE cancel) {
+std::wstring Download(const std::wstring& path, const std::wstring& to, HANDLE cancel, DWORD& status) {
     InternetHandle session{WinHttpOpen(L"InstantAltTab", WINHTTP_ACCESS_TYPE_AUTOMATIC_PROXY, WINHTTP_NO_PROXY_NAME,
                                        WINHTTP_NO_PROXY_BYPASS, 0)};
     InternetHandle connection{
@@ -91,7 +91,7 @@ std::wstring Download(const std::wstring& path, const std::wstring& to, HANDLE c
         !WinHttpReceiveResponse(request.handle, nullptr)) {
         return L"couldn't reach the symbol server (error " + std::to_wstring(GetLastError()) + L")";
     }
-    DWORD status = 0, size = sizeof(status);
+    DWORD size = sizeof(status);
     WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &status, &size,
                         nullptr);
     if (status != 200) return L"the symbol server answered " + std::to_wstring(status);
@@ -193,10 +193,14 @@ Symbols LookUpSymbols(const PeFile& file, const std::vector<std::wstring>& names
     CreateDirectoryW(downloadDirectory.c_str(), nullptr);
     std::wstring pdbPath = downloadDirectory + debug->pdbName;
     std::wstring urlPath = L"/download/symbols/" + debug->pdbName + L"/" + key + L"/" + debug->pdbName;
-    if (std::wstring failure = Download(urlPath, pdbPath, cancel); !failure.empty()) {
+    DWORD status = 0;
+    if (std::wstring failure = Download(urlPath, pdbPath, cancel, status); !failure.empty()) {
         DeleteFileW(pdbPath.c_str());
-        symbols.error = L"downloading the symbols of " + file.Path() + L" failed: " + failure;
         symbols.retryLater = true;
+        symbols.notPublished = status == 404;
+        symbols.error = symbols.notPublished
+                            ? L"Microsoft hasn't published the public symbols of " + file.Path() + L" yet"
+                            : L"downloading the symbols of " + file.Path() + L" failed: " + failure;
         return symbols;
     }
     symbols.error = LookUp(file, downloadDirectory, names, symbols.rvas);

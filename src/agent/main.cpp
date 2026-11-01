@@ -31,6 +31,7 @@ constexpr DWORD kPollMs = 2000;                // how often to look for the shel
 constexpr DWORD kSettleMs = 1500;              // lets the Alt+Tab opening that loaded the switcher finish first
 constexpr DWORD kFirstRetryMs = 60 * 1000;     // a failed symbol download is tried again after a minute,
 constexpr DWORD kMaxRetryMs = 60 * 60 * 1000;  // then less often, up to hourly
+constexpr DWORD kUnpublishedRetryMs = 24 * 60 * 60 * 1000;  // symbols Microsoft hasn't published: daily
 
 enum class WakeReason { Timeout, Stop, ExplorerExited, TurnedOff };
 
@@ -71,6 +72,10 @@ constexpr wchar_t kPausedMessage[] =
     L"Alt+Tab is back to normal speed: this version of Windows changed Alt+Tab in a way Instant Alt+Tab doesn't "
     L"recognize, so it left Alt+Tab alone.\n\nRun \"instant-alt-tab status\" for details. You'll see this once per "
     L"Windows update.";
+constexpr wchar_t kUnpublishedMessage[] =
+    L"Alt+Tab is at normal speed for now: Microsoft hasn't yet published the debugging symbols Instant Alt+Tab "
+    L"needs for this version of Windows. It checks again once a day and speeds Alt+Tab up as soon as they're "
+    L"available.";
 constexpr wchar_t kTurnedOffMessage[] =
     L"Instant Alt+Tab turned itself off: something in Explorer didn't behave as expected. Alt+Tab is back to normal "
     L"speed until Explorer restarts.\n\nDetails are in hook.log.";
@@ -155,10 +160,15 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
             Alert::ShowOnce(directory, L"paused " + BuildKey(explorer, switcher), kPausedMessage);
             return std::nullopt;
         }
+        DWORD waitMs = retryMs;
+        if (result->notPublished) {
+            waitMs = kUnpublishedRetryMs;
+            Alert::ShowOnce(directory, L"unpublished " + BuildKey(explorer, switcher), kUnpublishedMessage);
+        }
         WriteTextFile(directory + SharedNames::kProblemFile,
                       L"waiting to download Windows' public symbols: " + result->error);
-        Log(L"Explorer %lu: %s; trying again in %lu minutes", explorer.Pid(), result->error.c_str(), retryMs / 60000);
-        wake = WaitFor(stop, explorer.Handle(), retryMs);
+        Log(L"Explorer %lu: %s; trying again in %lu minutes", explorer.Pid(), result->error.c_str(), waitMs / 60000);
+        wake = WaitFor(stop, explorer.Handle(), waitMs);
         if (wake != WakeReason::Timeout) return std::nullopt;
     }
 }

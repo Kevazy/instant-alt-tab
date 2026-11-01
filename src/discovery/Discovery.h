@@ -17,8 +17,9 @@ namespace Discovery {
 
 struct Result {
     std::optional<AltTab::Internals> internals;
-    std::wstring error;       // what didn't match, when internals is empty
-    bool retryLater = false;  // the symbol download failed; the same files may work later
+    std::wstring error;         // what didn't match, when internals is empty
+    bool retryLater = false;    // the symbol download failed; the same files may work later
+    bool notPublished = false;  // because Microsoft hasn't published the symbols (yet)
 };
 
 // `cacheDirectory` (with a trailing backslash) keeps the looked-up symbol names.

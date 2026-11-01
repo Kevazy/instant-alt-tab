@@ -13,7 +13,8 @@ namespace Discovery {
 
 struct RuleFailed {
     std::wstring what;
-    bool retryLater = false;
+    bool retryLater = false;    // the symbol download failed
+    bool notPublished = false;  // because Microsoft hasn't published the symbols
 };
 
 template <typename T>

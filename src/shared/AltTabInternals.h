@@ -57,6 +57,9 @@ struct TwinuiInternals {
     uint32_t navigateToItemSlot, navigateSlot;              // the AltTab control's NavigateToItem and Navigate
     GUID switchItem;                                        // ISwitchItem: the shell's item behind each card
     GUID switchItemDataSource;                              // ISwitchItemDataSource: what the host's data source is
+    // The vtables of SwitchItem, the class of those items; zero if the symbols
+    // don't have them. Lets the hook recognize an item by reading memory.
+    uint32_t switchItemVtables[4];
 };
 
 // The switcher DLL is the Alt+Tab UI: the AltTab control and its card list.
@@ -78,7 +81,7 @@ struct SwitcherInternals {
 // Identify the struct below. The version is its layout's, not the program's:
 // raise it whenever a field is added, removed or moved.
 inline constexpr uint32_t kInternalsMagic = 0x42415441;  // "ATAB"
-inline constexpr uint32_t kInternalsVersion = 2;
+inline constexpr uint32_t kInternalsVersion = 3;
 
 // Everything above, passed to the hook DLL's Start as its parameter. The agent
 // copies it into Explorer's memory byte for byte, so its layout is the contract
