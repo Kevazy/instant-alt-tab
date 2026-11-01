@@ -20,6 +20,49 @@ export with the results. When Explorer exits it waits for the next one. `Stop` r
 everything, and the agent unloads the DLL only once `Stop` has confirmed that no code in it can run
 anymore.
 
+## The source
+
+| Folder | Becomes | What's in it |
+|---|---|---|
+| `src/cli` | `instant-alt-tab.exe` | the commands (`main.cpp`), installing and uninstalling (`Installer`), starting and stopping the agent (`AgentClient`), console output (`Console`) |
+| `src/agent` | `instant-alt-tab-agent.exe` | the loop that serves each Explorer (`main.cpp`); finding Explorer and loading, starting and stopping the hook DLL in it (`ExplorerProcess`); turning everything off after repeated Explorer crashes (`CrashGuard`); the message window (`Alert`) |
+| `src/discovery` | part of the agent | finding what the hooks need: the entry point (`Discovery`), the rules for each DLL (`TwinuiRules`, `SwitcherRules`, `Rules.h`), downloading and reading public symbols (`Symbols`), reading DLL files (`PeFile`), following what machine code does (`CodeAnalysis`) |
+| `src/hook` | `instant-alt-tab-hook.dll` | the `Start` and `Stop` exports (`DllMain.cpp`), keeping the menu (`PersistentMenu`), quiet card edits (`CardListUpdates`), the layer over MinHook (`Hooking`) |
+| `src/shared` | all three | what discovery hands the hooks (`AltTabInternals.h`), the names and codes the three programs agree on (`Ipc.h`), the log (`Log`), small text files (`TextFile`) |
+| `tools` | built on request | `Discover` runs discovery on any copies of the two DLLs; `MeasureLatency` measures how long the menu takes to appear |
+
+[CONTRIBUTING.md](../CONTRIBUTING.md) has the code style and a checklist for adding a discovered value.
+
+## Words used here
+
+- **Explorer**: `explorer.exe`, the process that draws the taskbar, Start and Alt+Tab (the shell).
+  File Explorer windows can live in it too, but here it always means the shell's process.
+- **twinui**: `twinui.pcshell.dll`, the Windows DLL that hosts the Alt+Tab view. Microsoft publishes
+  its symbols.
+- **The switcher DLL**: `WindowsInternal.ComposableShell.Experiences.Switcher.dll`, the menu itself:
+  the `AltTab` control and its card list. It has no public symbols.
+- **Card**: one window's tile in the menu. The shell's object behind it is an *item* (`ISwitchItem`).
+- **Card list**: the switcher's list of cards, which XAML displays and the shell keeps up to date.
+- **Opening**: one appearance of the menu, from Alt+Tab until it closes.
+- **Kept menu**: the control Instant Alt+Tab keeps alive between openings. A **rebuild** drops it
+  and lets Windows build a new one, which makes that opening as slow as stock.
+- **Stock**: Windows' own Alt+Tab, with no hooks active. Instant Alt+Tab ends up stock in three ways:
+  - **paused**: discovery didn't recognize this Windows build, so the hooks never load; until the
+    next Windows update changes the DLLs.
+  - **turned off**: the hooks saw something unexpected in Explorer and stopped; until Explorer
+    restarts.
+  - **disabled**: Explorer crashed twice within an hour while hooked; until the next install.
+- **Discovery**: working out, from the DLL files on the user's PC, every function and offset the
+  hooks need. What it finds are the **internals** (`AltTabInternals.h`).
+- **PE file**: the file format of Windows executables and DLLs. An **RVA** (relative virtual
+  address) is an offset from where the DLL is loaded in memory.
+- **Public symbols**: a PDB file Microsoft publishes for most Windows DLLs, which names their
+  functions. Downloaded once per Windows update from Microsoft's symbol server.
+- **Vtable** and **slot**: a COM object's table of method pointers, and a method's index in it.
+  An **interface ID** names a COM interface and never changes.
+- **Hook**, **detour**, **trampoline**: a hook redirects a function to a replacement (the detour);
+  the trampoline is how the detour still calls the original.
+
 ## What Windows does on Alt+Tab
 
 Two modules are involved:
@@ -43,7 +86,7 @@ windows that is ~280 ms before the first frame.
 
 ## The hooks
 
-### Keeping the menu (`persistent_menu.cpp`)
+### Keeping the menu (`PersistentMenu.cpp`)
 
 | Hooked | Why |
 |---|---|
@@ -71,7 +114,7 @@ A kept list that went through it would never hear of another window change. So t
 the kept list, which leaves the list exactly as it is after Esc. When the kept menu is dropped, the
 list is closed the stock way; otherwise the data source would keep it alive.
 
-### Quiet card edits (`card_list.cpp`)
+### Quiet card edits (`CardListUpdates.cpp`)
 
 The switcher edits the card vector one element at a time, and XAML rebuilds a card for every change
 notification it gets. A re-sync after one window opens moves about 85 cards; a sort makes about
@@ -197,4 +240,4 @@ On a build where it works, check at minimum:
   it is shown;
 - Task View, then Alt+Tab;
 - Alt+Tab with the taskbar focused;
-- the speed, with `tools/measure_latency.cpp`.
+- the speed, with `tools/MeasureLatency.cpp`.
