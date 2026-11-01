@@ -5,6 +5,6 @@ AccessModifierOffset: -4
 AllowShortFunctionsOnASingleLine: All
 AllowShortIfStatementsOnASingleLine: WithoutElse
 AllowShortCaseLabelsOnASingleLine: true
-AttributeMacros: [__fastcall, __stdcall]
+AttributeMacros: [__stdcall]
 IncludeBlocks: Preserve
 SortIncludes: Never

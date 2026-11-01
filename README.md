@@ -10,7 +10,7 @@ itself is unchanged: same look, same order, same keys.
 | Windows 11 | 279 ms | 334 ms |
 | Instant Alt+Tab | 44 ms | 58 ms |
 
-*Median of 20 openings, 2560×1440, measured with [`tools/measure_latency.cpp`](tools/measure_latency.cpp).*
+*Median of 20 openings, 2560×1440, measured with [`tools/MeasureLatency.cpp`](tools/MeasureLatency.cpp).*
 
 ## Why Alt+Tab is slow
 

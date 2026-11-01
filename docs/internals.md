@@ -46,7 +46,7 @@ windows that is ~280 ms before the first frame.
 
 ## The hooks
 
-### Keeping the menu (`persistent_menu.cpp`)
+### Keeping the menu (`PersistentMenu.cpp`)
 
 | Hooked | Why |
 |---|---|
@@ -74,7 +74,7 @@ A kept list that went through it would never hear of another window change. So t
 the kept list, which leaves the list exactly as it is after Esc. When the kept menu is dropped, the
 list is closed the stock way; otherwise the data source would keep it alive.
 
-### Quiet card edits (`card_list.cpp`)
+### Quiet card edits (`CardListUpdates.cpp`)
 
 The switcher edits the card vector one element at a time, and XAML rebuilds a card for every change
 notification it gets. A re-sync after one window opens moves about 85 cards; a sort makes about
@@ -200,4 +200,4 @@ On a build where it works, check at minimum:
   it is shown;
 - Task View, then Alt+Tab;
 - Alt+Tab with the taskbar focused;
-- the speed, with `tools/measure_latency.cpp`.
+- the speed, with `tools/MeasureLatency.cpp`.

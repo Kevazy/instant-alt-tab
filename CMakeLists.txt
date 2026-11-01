@@ -40,27 +40,27 @@ function(set_project_warnings target)
     target_compile_definitions(${target} PRIVATE UNICODE _UNICODE WIN32_LEAN_AND_MEAN NOMINMAX)
 endfunction()
 
-add_library(shared STATIC src/shared/log.cpp src/shared/text_file.cpp)
+add_library(shared STATIC src/shared/Log.cpp src/shared/TextFile.cpp)
 set_project_warnings(shared)
 
 # Loaded into Explorer by the agent.
 add_library(hook SHARED
-    src/hook/main.cpp
-    src/hook/hooking.cpp
-    src/hook/card_list.cpp
-    src/hook/persistent_menu.cpp)
+    src/hook/DllMain.cpp
+    src/hook/Hooking.cpp
+    src/hook/CardListUpdates.cpp
+    src/hook/PersistentMenu.cpp)
 set_target_properties(hook PROPERTIES OUTPUT_NAME instant-alt-tab-hook)
 set_project_warnings(hook)
 target_link_libraries(hook PRIVATE shared minhook windowsapp shcore)
 
 # Finding and injecting into Explorer, and the crash guard; used by the agent and the CLI.
 add_library(agent_core STATIC
-    src/agent/crash_guard.cpp
-    src/agent/explorer.cpp)
+    src/agent/CrashGuard.cpp
+    src/agent/ExplorerProcess.cpp)
 set_project_warnings(agent_core)
 
 # Runs in the background from sign-in; no window.
-add_executable(agent WIN32 src/agent/main.cpp src/agent/ComponentRegistration.cpp src/agent/notification.cpp)
+add_executable(agent WIN32 src/agent/main.cpp src/agent/ComponentRegistration.cpp src/agent/Alert.cpp)
 set_target_properties(agent PROPERTIES OUTPUT_NAME instant-alt-tab-agent)
 set_project_warnings(agent)
 target_link_libraries(agent PRIVATE agent_core discovery shared)
@@ -68,9 +68,9 @@ target_link_libraries(agent PRIVATE agent_core discovery shared)
 # The command-line tool: install, uninstall, status, start, stop.
 add_executable(cli
     src/cli/main.cpp
-    src/cli/install.cpp
-    src/cli/agent_client.cpp
-    src/cli/console.cpp)
+    src/cli/Installer.cpp
+    src/cli/AgentClient.cpp
+    src/cli/Console.cpp)
 set_target_properties(cli PROPERTIES OUTPUT_NAME instant-alt-tab)
 set_project_warnings(cli)
 target_compile_definitions(cli PRIVATE "PROJECT_VERSION=L\"${PROJECT_VERSION}\"")
@@ -78,21 +78,21 @@ target_link_libraries(cli PRIVATE agent_core shared shell32 ole32)
 
 # Finds the Windows internals the hooks need in the DLLs Explorer has loaded; used by the agent.
 add_library(discovery STATIC
-    src/discovery/code_analysis.cpp
-    src/discovery/discovery.cpp
-    src/discovery/pe_file.cpp
-    src/discovery/switcher.cpp
-    src/discovery/symbols.cpp
-    src/discovery/twinui.cpp)
+    src/discovery/CodeAnalysis.cpp
+    src/discovery/Discovery.cpp
+    src/discovery/PeFile.cpp
+    src/discovery/SwitcherRules.cpp
+    src/discovery/Symbols.cpp
+    src/discovery/TwinuiRules.cpp)
 set_project_warnings(discovery)
 target_link_libraries(discovery PUBLIC zydis PRIVATE winhttp)
 
 # Optional: runs discovery on any copies of the two DLLs (cmake --build --preset release --target discover).
-add_executable(discover EXCLUDE_FROM_ALL tools/discover.cpp)
+add_executable(discover EXCLUDE_FROM_ALL tools/Discover.cpp)
 set_project_warnings(discover)
 target_link_libraries(discover PRIVATE discovery ole32)
 
 # Optional: measures how fast the menu appears (cmake --build --preset release --target measure-latency).
-add_executable(measure-latency EXCLUDE_FROM_ALL tools/measure_latency.cpp)
+add_executable(measure-latency EXCLUDE_FROM_ALL tools/MeasureLatency.cpp)
 set_project_warnings(measure-latency)
 target_link_libraries(measure-latency PRIVATE d3d11 dxgi)
