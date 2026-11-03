@@ -1,5 +1,7 @@
 # Instant Alt+Tab
 
+![One Alt+Tab with 125 windows open, slowed down 10 times: Windows 11 shows the menu after 279 ms, Instant Alt+Tab after 44 ms](docs/media/race.webp)
+
 Windows 11 rebuilds the whole Alt+Tab menu every time you press Alt+Tab. With a lot of windows open,
 that takes long enough to feel: the menu pops in late, and fast switching stutters. Instant Alt+Tab
 keeps the menu alive between presses, so it opens in about 45 ms instead of about 280 ms. The menu
@@ -17,7 +19,12 @@ itself is unchanged: same look, same order, same keys.
 The Alt+Tab menu is a XAML control with one card per window: title, icon and live thumbnail. Windows
 creates that control when you press Alt+Tab and destroys it when the menu closes. Building it costs a
 few milliseconds per card, so the delay grows with every window you keep open. At around a hundred
-windows (browser windows add up quickly), the delay is easy to notice.
+windows (browser windows add up quickly), the delay is easy to notice. And it comes back with every
+press, so switching back and forth quickly adds it up:
+
+![Two quick Alt+Tabs with 125 windows open, slowed down 4 times: Windows 11 waits 279 ms for the menu each time, Instant Alt+Tab 44 ms](docs/media/timeline.webp)
+
+*Both animations show the measurement above, slowed down; [`tools/Showcase.py`](tools/Showcase.py) draws them.*
 
 ## How it works
 

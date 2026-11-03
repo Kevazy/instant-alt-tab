@@ -33,7 +33,7 @@ and Explorer would have loaded it at the first Alt+Tab anyway.
 
 In the source, `src/cli`, `src/agent` and `src/hook` hold the three programs (the command-line
 tool also uses some of the agent's code), `src/discovery` the agent's code that finds the internals,
-`src/shared` what more than one of them uses, and `tools` two developer tools. Good places to start
+`src/shared` what more than one of them uses, and `tools` developer tools. Good places to start
 reading are the agent's main loop, `Discovery::Discover`, and the hook DLL's `Start`.
 
 ## Words used here
