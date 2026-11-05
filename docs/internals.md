@@ -83,9 +83,12 @@ Two modules are involved:
   2. asks the data source for the foreground window's item,
   3. positions the selection through the control's `NavigateToItem` and `Navigate`,
   4. puts the control into the host window and registers its XAML root,
-  5. displays it (`DisplayAltTab`).
+  5. displays it (`DisplayAltTab`) once the control has loaded, which for a new control is usually
+     after `Show` has returned.
 
-  Dismissing the menu clears the host window's content, and the control is destroyed with it.
+  Dismissing the menu clears the host window's content, and the control is destroyed with it. If
+  Alt is released while `Show` is still building a new menu, the dismissal arrives inside `Show`,
+  which gives up before step 4: that menu never appears, and the next press has to build again.
 - **The switcher DLL** is the menu itself: the `AltTab` control, a card list view model that owns a
   vector of card view models, and the XAML that renders one card per vector element. The list
   subscribes to the shell's window data source and re-syncs its vector from it.

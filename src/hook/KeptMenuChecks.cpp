@@ -139,6 +139,8 @@ bool InspectTree(MenuState& kept) {
 std::optional<std::wstring> ReuseBlocker(void* host, void* display) {
     if (!g_kept) return L"first opening";
     MenuState& kept = *g_kept;
+    // Alt was released while Show was building it, so Windows gave up on it before it went into its window.
+    if (!kept.hidden && !kept.displayed) return L"previous menu dismissed before it appeared";
     if (!kept.hidden || !kept.hostWindow) return L"previous menu not kept";
     if (!kept.verified) return L"card list not verified";
     if (!g_cardItemOffset) return L"card layout not learned yet";
