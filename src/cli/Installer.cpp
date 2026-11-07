@@ -28,13 +28,15 @@ constexpr DWORD kStopTimeoutMs = 30000;
 constexpr DWORD kCopyRetryMs = 5000;  // a just-stopped agent may still be unmapping its executable
 constexpr DWORD kReadyPollMs = 250;
 constexpr ULONGLONG kAgentStartMs = 5000;      // until a just-launched agent has created its mutex
-constexpr ULONGLONG kReadyTimeoutMs = 180000;  // a first download of the symbols on a slow connection
+constexpr ULONGLONG kReadyTimeoutMs = 180000;  // without progress: a stalled download, or an agent that hangs
 constexpr ULONGLONG kHooksStartMs = 5000;      // from the Hooked marker to the Active one
 constexpr ULONGLONG kDotEveryMs = 2000;
 constexpr DWORD kFocusPollMs = 100;
-constexpr ULONGLONG kInFrontForMs = 300;  // back in front and settled, not mid-click
-constexpr DWORD kTurnOffMs = 250;         // the hooks turn off from a message posted to Explorer's UI thread
-constexpr int kLineWidth = 90;            // label and dots, leaving room for " ready." in a 100-column window
+constexpr ULONGLONG kInFrontForMs = 300;    // back in front and settled, not mid-click
+constexpr ULONGLONG kHeldGiveUpMs = 10000;  // in front, but a key reads as held (stuck, or a remapping tool)
+constexpr DWORD kTurnOffMs = 250;           // the hooks turn off from a message posted to Explorer's UI thread
+constexpr int kLineWidth = 90;              // label and dots, leaving room for " ready." in a 100-column window
+constexpr int kReadyRoom = 8;               // " ready." after the dots, and the cursor
 
 std::wstring AgentCommand() { return L"\"" + InstallDirectory() + SharedNames::kAgentExecutable + L"\""; }
 
@@ -149,6 +151,7 @@ bool Downloading(const std::wstring& directory) {
 struct Download {
     std::wstring file;
     int percent = -1;  // -1 while its size isn't known
+    long long megabytes = 0;
     bool operator==(const Download&) const = default;
 };
 
@@ -171,8 +174,16 @@ std::optional<Download> CurrentDownload(const std::wstring& directory) {
     }
     long long total = _wtoi64(ReadTextFile(pdb + SharedNames::kDownloadSizeSuffix).c_str());
     Download download{found.cFileName};
+    download.megabytes = have.QuadPart >> 20;
     if (total > 0) download.percent = static_cast<int>(std::min<long long>(100, have.QuadPart * 100 / total));
     return download;
+}
+
+// Room for a step's label and its dots: within the window, so the line never
+// wraps (a wrapped line can't be cleared and written again).
+int LineWidth() {
+    int columns = ConsoleColumns();
+    return columns > 0 ? std::min(kLineWidth, columns - kReadyRoom) : kLineWidth;
 }
 
 void PrintTurnedOff(const std::wstring& directory) {
@@ -186,11 +197,18 @@ void PrintTurnedOff(const std::wstring& directory) {
 // switched away, it waits until they're back (their own Alt+Tab back builds the
 // menu too). Returns whether the menu is kept.
 bool OpenAltTabOnce(const ExplorerProcess& explorer) {
-    for (ULONGLONG inFrontSince = 0;; Sleep(kFocusPollMs)) {
+    for (ULONGLONG inFrontSince = 0, heldSince = 0;; Sleep(kFocusPollMs)) {
         if (FirstAltTab::IsKept(explorer.Pid()).value_or(false)) return true;
         if (!explorer.IsActive()) return false;
         if (!FirstAltTab::CanOpenNow()) {
             inFrontSince = 0;
+            if (!FirstAltTab::InFront()) {
+                heldSince = 0;
+            } else if (!heldSince) {
+                heldSince = GetTickCount64();
+            } else if (GetTickCount64() - heldSince >= kHeldGiveUpMs) {
+                return false;
+            }
         } else if (!inFrontSince) {
             inFrontSince = GetTickCount64();
         } else if (GetTickCount64() - inFrontSince >= kInFrontForMs) {
@@ -310,8 +328,9 @@ bool WaitUntilReady(const std::wstring& directory, bool openAltTab) {
     int dots = 0;
     bool agentSeen = false, explainedDownload = false;
     std::optional<Download> progress;  // the download's progress, shown in place of the step's line
-    ULONGLONG started = GetTickCount64(), lastDot = started, hookedSince = 0;
-    Ask(L"%s", label);
+    // The timeout counts from the last sign of progress, so a slow but moving download isn't cut off.
+    ULONGLONG started = GetTickCount64(), lastDot = started, hookedSince = 0, progressedAt = started;
+    Ask(L"%s...", label);
     for (;; Sleep(kReadyPollMs)) {
         ULONGLONG waited = GetTickCount64() - started;
         ExplorerProcess explorer = ExplorerProcess::Find();
@@ -326,8 +345,8 @@ bool WaitUntilReady(const std::wstring& directory, bool openAltTab) {
                 bool kept = FirstAltTab::IsKept(explorer.Pid()).value_or(false);
                 if (!kept && openAltTab) {
                     bool canOpen = FirstAltTab::CanOpenNow();
-                    Ask(canOpen ? L"Opening Alt+Tab once to get it ready..."
-                                : L"Opening Alt+Tab once to get it ready, as soon as this window is in front again...");
+                    Ask(canOpen ? L"Opening Alt+Tab once to warm it up..."
+                                : L"Opening Alt+Tab once to warm it up, as soon as this window is in front again...");
                     kept = OpenAltTabOnce(explorer);
                     Sleep(kTurnOffMs);  // if that opening turned the hooks off, it shows by now
                     if (EventIsSet(SharedNames::TurnedOffEventName(explorer.Pid()))) {
@@ -383,7 +402,7 @@ bool WaitUntilReady(const std::wstring& directory, bool openAltTab) {
             }
             return false;
         }
-        if (waited >= kReadyTimeoutMs) {
+        if (GetTickCount64() - progressedAt >= kReadyTimeoutMs) {
             Print(L"");
             Print(L"<warn>Still setting up.</> It carries on in the background; Alt+Tab speeds up once it's done.");
             return false;
@@ -399,26 +418,25 @@ bool WaitUntilReady(const std::wstring& directory, bool openAltTab) {
             if (!ClearLine()) Print(L"");
             if (phase == Phase::Downloading && !explainedDownload) {
                 explainedDownload = true;
-                Print(
-                    L"<dim>This is the first run on this version of Windows, so it first downloads Alt+Tab's "
-                    L"symbol");
-                Print(L"files from Microsoft, usually in under a minute.</>");
+                Print(L"<dim>This is the first run on this version of Windows: it downloads Alt+Tab's symbol files");
+                Print(L"from Microsoft, usually in under a minute.</>");
                 Print(L"");
             }
             label = phase == Phase::Downloading          ? L"Downloading"
                     : phase == Phase::WaitingForExplorer ? L"Waiting for Explorer (the taskbar) to start"
                                                          : L"Setting up";
-            Ask(L"%s", label);
+            Ask(L"%s...", label);
         } else if (auto download = phase == Phase::Downloading ? CurrentDownload(directory) : std::nullopt;
                    download && download != progress && ClearLine()) {
             if (download->percent < 0) {
-                Ask(L"Downloading %s...", download->file.c_str());
+                Ask(L"Downloading %s... <good>%lld MB</>", download->file.c_str(), download->megabytes);
             } else {
                 Ask(L"Downloading %s... <good>%d%%</>", download->file.c_str(), download->percent);
             }
             progress = download;
+            progressedAt = GetTickCount64();
         } else if (!progress && GetTickCount64() - lastDot >= kDotEveryMs &&
-                   dots < kLineWidth - static_cast<int>(wcslen(label))) {
+                   dots < LineWidth() - static_cast<int>(wcslen(label)) - 3) {
             Ask(L"<dim>.</>");
             ++dots;
             lastDot = GetTickCount64();
@@ -439,7 +457,13 @@ bool Uninstall(const std::wstring& runningFrom) {
     if (_wcsicmp(runningFrom.c_str(), target.c_str()) == 0) {
         DeleteAfterExit(folder);
         DeleteAtNextSignIn(folder);  // in case it's still in use when the retries run out
-        Print(L"<good>Uninstalled.</> %s is deleted in a moment.", folder.c_str());
+        if (stopped) {
+            Print(L"<good>Uninstalled.</> %s is deleted in a moment.", folder.c_str());
+        } else {
+            Print(L"<warn>Partly uninstalled:</> Explorer still has a file of it loaded, so %s is deleted once",
+                  folder.c_str());
+            Print(L"Explorer restarts, or at the next sign-in.");
+        }
         return stopped;
     }
     std::error_code error;

@@ -3,7 +3,7 @@
 // check the rules against other Windows builds (old copies are kept in
 // C:\Windows\WinSxS) without touching Explorer.
 //
-// usage: discover [--twinui PATH] [--switcher PATH] [--cache DIR]
+// usage: discover [--twinui PATH] [--switcher PATH] [--datamodel PATH] [--cache DIR]
 
 #include "../src/discovery/Discovery.h"
 

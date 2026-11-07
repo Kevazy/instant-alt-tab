@@ -18,6 +18,8 @@ std::optional<bool> IsKept(DWORD explorerPid);
 // front, so the keys can't act on another window, and no key or mouse button is
 // held, so they can't combine with the user's own.
 bool CanOpenNow();
+// Whether the console window is in front (whatever is held).
+bool InFront();
 
 // Presses Alt+Tab, waits until the menu is on screen, and cancels it with Esc,
 // which returns to the console (releasing Alt instead would switch windows).

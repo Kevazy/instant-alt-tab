@@ -118,7 +118,18 @@ std::wstring Download(const std::wstring& path, const std::wstring& to, HANDLE c
         if (cancelled()) return L"stopped";
         if (total + read > kMaxPdbBytes || !file.write(buffer.data(), read)) return L"couldn't save the download";
     }
+    if (length && total != length) return L"the download broke off early";  // retried like any other break
     return {};
+}
+
+void ClearFolder(const std::wstring& folder) {
+    WIN32_FIND_DATAW found;
+    HANDLE search = FindFirstFileW((folder + L"*").c_str(), &found);
+    if (search == INVALID_HANDLE_VALUE) return;
+    do {
+        if (!(found.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) DeleteFileW((folder + found.cFileName).c_str());
+    } while (FindNextFileW(search, &found));
+    FindClose(search);
 }
 
 // dbghelp from System32, never a copy next to the agent.
@@ -202,6 +213,7 @@ Symbols LookUpSymbols(const PeFile& file, const std::vector<std::wstring>& names
     std::wstring downloadDirectory = cacheDirectory + SharedNames::kSymbolsDownloadFolder;
     CreateDirectoryW(cacheDirectory.c_str(), nullptr);
     CreateDirectoryW(downloadDirectory.c_str(), nullptr);
+    ClearFolder(downloadDirectory);  // what an agent that was stopped mid-download left
     std::wstring pdbPath = downloadDirectory + debug->pdbName;
     std::wstring urlPath = L"/download/symbols/" + debug->pdbName + L"/" + key + L"/" + debug->pdbName;
     DWORD status = 0;
@@ -209,6 +221,7 @@ Symbols LookUpSymbols(const PeFile& file, const std::vector<std::wstring>& names
     DeleteFileW((pdbPath + SharedNames::kDownloadSizeSuffix).c_str());
     if (!failure.empty()) {
         DeleteFileW(pdbPath.c_str());
+        RemoveDirectoryW(downloadDirectory.c_str());
         symbols.retryLater = true;
         symbols.notPublished = status == 404;
         symbols.error = symbols.notPublished

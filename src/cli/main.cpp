@@ -47,9 +47,9 @@ bool PrintStatus(bool forPrompt = false) {
     ExplorerProcess explorer = ExplorerProcess::Find();
     bool hooked = explorer.IsValid() && explorer.IsHooked();
     bool instant = hooked && explorer.IsActive();
-    const wchar_t* altTab = !hooked   ? L"stock"
+    const wchar_t* altTab = !hooked   ? L"normal speed"
                             : instant ? L"instant"
-                                      : L"stock (the hooks turned themselves off; see hook.log)";
+                                      : L"normal speed (the hooks turned themselves off; see hook.log)";
     bool installed = Installer::IsInstalled();
     Print(L"<dim>Installed:</>          %s", installed ? Installer::InstallDirectory().c_str() : L"no");
     Print(L"<dim>Starts at sign-in:</>  %s", Installer::StartsAtSignIn() ? L"yes" : L"no");
@@ -62,7 +62,7 @@ bool PrintStatus(bool forPrompt = false) {
                           L"it back on.");
     }
     if (std::wstring problem = ReadTextFile(ActiveDirectory() + SharedNames::kProblemFile); !problem.empty()) {
-        Print(L"<dim>Why it's stock:</>     %s", problem.c_str());
+        Print(L"<dim>Why not instant:</>    %s", problem.c_str());
     }
     return true;
 }
@@ -101,7 +101,7 @@ bool Start() {
 
 bool Stop() {
     bool stopped = Installer::StopAgentAndHooks(ActiveDirectory() + SharedNames::kHookDll);
-    if (stopped) Print(L"<good>Stopped.</> Alt+Tab is back to stock until the agent starts again.");
+    if (stopped) Print(L"<good>Stopped.</> Alt+Tab is back to normal speed until the agent starts again.");
     return stopped;
 }
 

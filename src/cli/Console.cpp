@@ -104,6 +104,12 @@ void Ask(const wchar_t* format, ...) {
     va_end(args);
 }
 
+int ConsoleColumns() {
+    CONSOLE_SCREEN_BUFFER_INFO info;
+    if (!GetConsoleScreenBufferInfo(GetStdHandle(STD_OUTPUT_HANDLE), &info)) return 0;
+    return info.srWindow.Right - info.srWindow.Left + 1;
+}
+
 bool ClearLine() {
     if (!TheTerminal().Sequences()) return false;
     constexpr std::wstring_view kClear = L"\r\x1b[2K";  // to the line's start, then clear it

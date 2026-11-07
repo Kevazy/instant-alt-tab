@@ -102,7 +102,7 @@ What had been checked as of November 2026:
   what Windows actually passes around.
 - **It turns itself off when in doubt.** If Windows does anything unexpected (a failed call, a card
   list that isn't the one the menu shows, an exception), it drops the kept menu, Alt+Tab stays
-  stock until Explorer restarts, and a message tells you.
+  at normal speed until Explorer restarts, and a message tells you.
 - **It stops for good after repeated crashes.** If Explorer crashes twice within an hour after the
   agent loaded anything into it, the agent stops loading anything until you install again.
 - **Stopping and uninstalling remove every hook from the running Explorer.** If a hooked call is
@@ -143,8 +143,8 @@ discover` builds a tool that runs the discovery on any copies of the DLLs
 
 ## Troubleshooting
 
-Double-clicking `instant-alt-tab.exe` again shows the current state, including why Alt+Tab is
-stock if it is. From a terminal, `instant-alt-tab status` shows the same; run it without a command
+Double-clicking `instant-alt-tab.exe` again shows the current state, including why Alt+Tab isn't
+instant if it isn't. From a terminal, `instant-alt-tab status` shows the same; run it without a command
 for the others (`install`, `uninstall`, `start`, and `stop`, which turns it off until the next
 sign-in). The agent writes `agent.log` and the hooks write `hook.log` to the install folder; both
 record starts, stops, menu rebuilds and anything unexpected.

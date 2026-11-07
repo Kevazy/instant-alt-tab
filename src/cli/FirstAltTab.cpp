@@ -85,6 +85,8 @@ std::optional<bool> IsKept(DWORD explorerPid) {
 
 bool CanOpenNow() { return ConsoleInFront() && !AnyKeyOrButtonHeld(); }
 
+bool InFront() { return ConsoleInFront(); }
+
 bool Open(DWORD explorerPid) {
     HookEvent opening(SharedNames::MenuOpeningEventName(explorerPid));
     HookEvent shown(SharedNames::MenuShownEventName(explorerPid));
