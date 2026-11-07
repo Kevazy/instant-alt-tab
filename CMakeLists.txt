@@ -72,7 +72,7 @@ target_link_libraries(agent PRIVATE agent_core discovery shared)
 # download: the agent and the hook DLL are built into it, as resources named after their files,
 # and installing writes them next to it.
 file(GENERATE OUTPUT ${CMAKE_BINARY_DIR}/embedded-$<CONFIG>.rc CONTENT
-    "\"$<TARGET_FILE_NAME:agent>\" RCDATA \"$<TARGET_FILE:agent>\"\n\"$<TARGET_FILE_NAME:hook>\" RCDATA \"$<TARGET_FILE:hook>\"\n")
+    "$<TARGET_FILE_NAME:agent> RCDATA \"$<TARGET_FILE:agent>\"\n$<TARGET_FILE_NAME:hook> RCDATA \"$<TARGET_FILE:hook>\"\n")
 add_executable(cli
     src/cli/main.cpp
     src/cli/Installer.cpp
