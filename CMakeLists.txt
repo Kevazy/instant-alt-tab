@@ -78,6 +78,7 @@ add_executable(cli
     src/cli/Installer.cpp
     src/cli/AgentClient.cpp
     src/cli/Console.cpp
+    src/cli/FirstAltTab.cpp
     ${CMAKE_BINARY_DIR}/embedded-$<CONFIG>.rc)
 add_dependencies(cli agent hook)
 set_target_properties(cli PROPERTIES OUTPUT_NAME instant-alt-tab)

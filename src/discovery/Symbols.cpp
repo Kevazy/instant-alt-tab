@@ -1,5 +1,7 @@
 #include "Symbols.h"
 
+#include "../shared/SharedNames.h"
+
 #include <windows.h>
 #include <dbghelp.h>
 #include <winhttp.h>
@@ -99,6 +101,12 @@ std::wstring Download(const std::wstring& path, const std::wstring& to, HANDLE c
                         nullptr);
     if (status != 200) return L"the symbol server answered " + std::to_wstring(status);
 
+    uint64_t length = 0;
+    size = sizeof(length);
+    if (WinHttpQueryHeaders(request.handle, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER64, nullptr,
+                            &length, &size, nullptr)) {
+        std::ofstream(to + SharedNames::kDownloadSizeSuffix) << length;  // written before the PDB appears
+    }
     std::ofstream file(to, std::ios::binary | std::ios::trunc);
     uint64_t total = 0;
     std::vector<char> buffer(1 << 16);
@@ -191,13 +199,15 @@ Symbols LookUpSymbols(const PeFile& file, const std::vector<std::wstring>& names
         return symbols;
     }
 
-    std::wstring downloadDirectory = cacheDirectory + L"download\\";
+    std::wstring downloadDirectory = cacheDirectory + SharedNames::kSymbolsDownloadFolder;
     CreateDirectoryW(cacheDirectory.c_str(), nullptr);
     CreateDirectoryW(downloadDirectory.c_str(), nullptr);
     std::wstring pdbPath = downloadDirectory + debug->pdbName;
     std::wstring urlPath = L"/download/symbols/" + debug->pdbName + L"/" + key + L"/" + debug->pdbName;
     DWORD status = 0;
-    if (std::wstring failure = Download(urlPath, pdbPath, cancel, status); !failure.empty()) {
+    std::wstring failure = Download(urlPath, pdbPath, cancel, status);
+    DeleteFileW((pdbPath + SharedNames::kDownloadSizeSuffix).c_str());
+    if (!failure.empty()) {
         DeleteFileW(pdbPath.c_str());
         symbols.retryLater = true;
         symbols.notPublished = status == 404;

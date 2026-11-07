@@ -58,6 +58,9 @@ wchar_t g_workerClass[64];
 std::atomic<bool> g_turnOffRequested{false}, g_finalStop{false};
 HANDLE g_stoppedEvent = nullptr;
 HANDLE g_turnedOffEvent = nullptr;  // see SharedNames::TurnedOffEventName
+HANDLE g_shownEvent = nullptr;      // see SharedNames::MenuShownEventName
+HANDLE g_readyEvent = nullptr;      // see SharedNames::MenuReadyEventName
+HANDLE g_openingEvent = nullptr;    // see SharedNames::MenuOpeningEventName
 
 // ---------------------------------------------------------------------------
 // Keeping and dropping the menu
@@ -103,10 +106,13 @@ void DropKeptMenu() {
         if (HostWindowShows(kept.hostWindow.get(), kept.control.get())) Log(L"detaching the hidden menu failed");
     }
     g_kept.reset();
+    SignalMenu(/*shown*/ false, /*ready*/ false);
 }
 
 void StopKeepingMenus() {
     g_enabled = false;
+    SignalMenu(/*shown*/ false, /*ready*/ false);
+    if (g_openingEvent) ResetEvent(g_openingEvent);
     if (HANDLE marker = g_activeMarker.exchange(nullptr)) CloseHandle(marker);
 }
 
@@ -123,6 +129,11 @@ void CompleteTurnOff() {
 }
 
 }  // namespace
+
+void SignalMenu(bool shown, bool ready) {
+    if (g_shownEvent) shown ? SetEvent(g_shownEvent) : ResetEvent(g_shownEvent);
+    if (g_readyEvent) ready ? SetEvent(g_readyEvent) : ResetEvent(g_readyEvent);
+}
 
 // Fails closed: something unexpected happened, so stop keeping menus.
 void TurnOff(const wchar_t* reason) {
@@ -205,6 +216,7 @@ HRESULT ShowHook(void* host, void* display, int flags, void* view) {
     HookScope scope;
     if (!g_enabled || g_opening || !OnUiThread()) return g_originalShow(host, display, flags, view);
 
+    if (g_openingEvent) SetEvent(g_openingEvent);  // until the dismissal
     Opening opening{host, display, flags};
     g_opening = &opening;
     g_displayedHost = nullptr;
@@ -297,6 +309,9 @@ void DismissHook(void* host) {
     g_dismissingHost = previous;
     if (g_displayedHost == host) g_displayedHost = nullptr;
     if (g_kept && g_kept->hidden) TidyHiddenMenu();
+    for (HANDLE event : {g_shownEvent, g_openingEvent}) {
+        if (event) ResetEvent(event);
+    }
 }
 
 void SetHostContentHook(IUnknown** window, IUnknown** content) {
@@ -434,9 +449,16 @@ bool InstallHooks(const ModuleImage& twinui, const ModuleImage& switcher, const 
 }
 
 void Enable() {
-    g_activeMarker = CreateEventW(nullptr, TRUE, TRUE, SharedNames::ActiveMarkerName(GetCurrentProcessId()).c_str());
-    g_turnedOffEvent =
-        CreateEventW(nullptr, TRUE, FALSE, SharedNames::TurnedOffEventName(GetCurrentProcessId()).c_str());
+    DWORD pid = GetCurrentProcessId();
+    g_activeMarker = CreateEventW(nullptr, TRUE, TRUE, SharedNames::ActiveMarkerName(pid).c_str());
+    // An earlier copy of this DLL in the same Explorer may have left these set: its handles outlive it.
+    g_turnedOffEvent = CreateEventW(nullptr, TRUE, FALSE, SharedNames::TurnedOffEventName(pid).c_str());
+    g_shownEvent = CreateEventW(nullptr, TRUE, FALSE, SharedNames::MenuShownEventName(pid).c_str());
+    g_readyEvent = CreateEventW(nullptr, TRUE, FALSE, SharedNames::MenuReadyEventName(pid).c_str());
+    g_openingEvent = CreateEventW(nullptr, TRUE, FALSE, SharedNames::MenuOpeningEventName(pid).c_str());
+    for (HANDLE event : {g_turnedOffEvent, g_shownEvent, g_readyEvent, g_openingEvent}) {
+        if (event) ResetEvent(event);
+    }
     g_enabled = true;
 }
 

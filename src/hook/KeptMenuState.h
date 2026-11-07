@@ -104,6 +104,9 @@ extern bool g_cardItemOffsetConfirmed;
 // KeptMenu.cpp
 // Fails closed: something unexpected happened, so stop keeping menus.
 void TurnOff(const wchar_t* reason);
+// Sets or clears the events that tell the installer the kept menu is on screen, and that the next
+// opening will reuse it (SharedNames::MenuShownEventName, MenuReadyEventName).
+void SignalMenu(bool shown, bool ready);
 
 // KeptMenuChecks.cpp
 xaml::FrameworkElement AsElement(IUnknown* control);

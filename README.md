@@ -45,11 +45,13 @@ functions:
   the theme, high contrast or the window colors change. Monitors going to sleep and waking up don't
   count.
 
-The menu that is kept has to be built once, so the first Alt+Tab after installing, and the first
-after Explorer starts (at sign-in, or after a restart), open at the usual speed. Windows loads part
-of its Alt+Tab code only on the first press; the agent loads it as soon as Explorer starts, so the
-hooks are ready for that first press. (Right after a Windows update the agent first downloads the
-new build's symbols, so that can take a little longer.)
+The menu that is kept has to be built once, so the first Alt+Tab after Explorer starts (at sign-in,
+or after a restart) opens at the usual speed. The installer opens Alt+Tab once itself when it's done,
+so after installing even your first press is instant. Windows loads part of its Alt+Tab code only on
+the first press; the agent loads it as soon as Explorer starts, so the hooks are ready for that first
+press. The first time on each Windows build (when you install it, and after a Windows update) the
+agent first downloads that build's symbols from Microsoft, which usually takes under a minute; the
+installer shows when it's ready.
 
 [docs/internals.md](docs/internals.md) explains each hook and how the internals are found. If you
 want to work on the code, start with [CONTRIBUTING.md](CONTRIBUTING.md).

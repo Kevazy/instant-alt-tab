@@ -96,6 +96,13 @@ extern "C" __declspec(dllexport) DWORD WINAPI Start(void* parameter) {
         if (!g_hookedMarker || GetLastError() == ERROR_ALREADY_EXISTS) {
             result = HookExports::kAlreadyRunning;
         } else {
+            // An earlier copy's handles outlive it, so its turned-off event may still be set:
+            // clear it right away, before anyone takes it for this copy's.
+            if (HANDLE turnedOff = OpenEventW(EVENT_MODIFY_STATE, FALSE,
+                                              SharedNames::TurnedOffEventName(GetCurrentProcessId()).c_str())) {
+                ResetEvent(turnedOff);
+                CloseHandle(turnedOff);
+            }
             result = StartHooks(*found);
         }
         if (result == HookExports::kStarted) {

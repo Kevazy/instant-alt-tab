@@ -185,6 +185,7 @@ void TidyHiddenMenu() {
                 viewer.ChangeView(Offset(0.0), Offset(0.0), nullptr, /*disableAnimation*/ true);
             }
         }
+        SignalMenu(/*shown*/ false, kept.verified && g_cardItemOffset && !kept.missedWindow && kept.context);
     } catch (...) {
         TurnOff(L"tidying the hidden menu threw an exception");
     }
@@ -208,6 +209,7 @@ void OnKeptMenuDisplayed() {
     MenuState& kept = *g_kept;
     kept.hidden = false;
     kept.displayed = true;
+    SignalMenu(/*shown*/ true, /*ready*/ false);
     if (HWND window = MenuWindowInForeground()) kept.window = window;
     // Windows chose another monitor than the one the menu was laid out for.
     if (kept.context && kept.window) {

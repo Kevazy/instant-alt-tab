@@ -4,6 +4,7 @@
 #include "Installer.h"
 #include "AgentClient.h"
 #include "Console.h"
+#include "FirstAltTab.h"
 #include "../agent/CrashGuard.h"
 #include "../agent/ExplorerProcess.h"
 #include "../shared/SharedNames.h"
@@ -30,7 +31,7 @@ std::wstring ActiveDirectory() {
 }
 
 void PrintUsage() {
-    Print(L"Instant Alt+Tab " PROJECT_VERSION L": opens the Windows 11 Alt+Tab menu instantly.");
+    Print(L"<b>Instant Alt+Tab</> " PROJECT_VERSION L": opens the Windows 11 Alt+Tab menu instantly.");
     Print(L"");
     Print(L"Usage: instant-alt-tab <command>");
     Print(L"");
@@ -41,21 +42,27 @@ void PrintUsage() {
     Print(L"  stop        stop the agent and remove the hooks until the next start or sign-in");
 }
 
-bool PrintStatus() {
+// `forPrompt`: shown above a question that offers to turn it back on, so it doesn't say how.
+bool PrintStatus(bool forPrompt = false) {
     ExplorerProcess explorer = ExplorerProcess::Find();
     bool hooked = explorer.IsValid() && explorer.IsHooked();
-    const wchar_t* altTab = !hooked               ? L"stock"
-                            : explorer.IsActive() ? L"instant"
-                                                  : L"stock (the hooks turned themselves off; see hook.log)";
-    Print(L"Installed:          %s", Installer::IsInstalled() ? Installer::InstallDirectory().c_str() : L"no");
-    Print(L"Starts at sign-in:  %s", Installer::StartsAtSignIn() ? L"yes" : L"no");
-    Print(L"Agent:              %s", AgentClient::IsRunning() ? L"running" : L"not running");
-    Print(L"Alt+Tab:            %s", altTab);
-    if (Installer::IsInstalled() && Installer::DisabledByCrashGuard()) {
-        Print(L"Turned off after Explorer crashed twice within an hour; install again to turn it back on.");
+    bool instant = hooked && explorer.IsActive();
+    const wchar_t* altTab = !hooked   ? L"stock"
+                            : instant ? L"instant"
+                                      : L"stock (the hooks turned themselves off; see hook.log)";
+    bool installed = Installer::IsInstalled();
+    Print(L"<dim>Installed:</>          %s", installed ? Installer::InstallDirectory().c_str() : L"no");
+    Print(L"<dim>Starts at sign-in:</>  %s", Installer::StartsAtSignIn() ? L"yes" : L"no");
+    Print(AgentClient::IsRunning() ? L"<dim>Agent:</>              <good>running</>"
+                                   : L"<dim>Agent:</>              <warn>not running</>");
+    Print(instant ? L"<dim>Alt+Tab:</>            <good>%s</>" : L"<dim>Alt+Tab:</>            <warn>%s</>", altTab);
+    if (installed && Installer::DisabledByCrashGuard()) {
+        Print(forPrompt ? L"<warn>Turned off after Explorer crashed twice within an hour.</>"
+                        : L"<warn>Turned off after Explorer crashed twice within an hour;</> install again to turn "
+                          L"it back on.");
     }
     if (std::wstring problem = ReadTextFile(ActiveDirectory() + SharedNames::kProblemFile); !problem.empty()) {
-        Print(L"Why it's stock:     %s", problem.c_str());
+        Print(L"<dim>Why it's stock:</>     %s", problem.c_str());
     }
     return true;
 }
@@ -63,35 +70,51 @@ bool PrintStatus() {
 bool Start() {
     std::wstring directory = ActiveDirectory();
     if (CrashGuard(directory).Disabled()) {
-        Print(L"Turned off after Explorer crashed twice within an hour; install again to turn it back on.");
+        Print(L"<warn>Turned off after Explorer crashed twice within an hour;</> install again to turn it back on.");
         return false;
     }
     std::wstring agent = directory + SharedNames::kAgentExecutable;
     if (GetFileAttributesW(agent.c_str()) == INVALID_FILE_ATTRIBUTES) {
-        Print(L"Not installed: run instant-alt-tab without a command to install it.");
+        Print(L"<warn>Not installed:</> run instant-alt-tab without a command to install it.");
         return false;
     }
-    if (!AgentClient::IsRunning() && !AgentClient::Launch(agent)) {
-        Print(L"Starting the agent failed (error %lu).", GetLastError());
-        return false;
+    if (AgentClient::IsRunning()) {
+        ExplorerProcess explorer = ExplorerProcess::Find();
+        if (explorer.IsValid() && explorer.IsActive()) {
+            if (FirstAltTab::IsKept(explorer.Pid()).value_or(true)) {  // older hooks don't say
+                Print(L"<good>Already running;</> Alt+Tab opens instantly.");
+            } else {
+                Print(L"<good>Already running.</> The next Alt+Tab opens at normal speed while it builds the menu,");
+                Print(L"and every one after that opens instantly.");
+            }
+            return true;
+        }
+    } else {
+        DeleteFileW((directory + SharedNames::kProblemFile).c_str());  // from an earlier run
+        if (!AgentClient::Launch(agent)) {
+            Print(L"<bad>Starting the agent failed</> (error %lu).", GetLastError());
+            return false;
+        }
     }
-    Print(L"Running. Alt+Tab opens at the usual speed once while it sets up, then instantly.");
-    return true;
+    return Installer::WaitUntilReady(directory, /*openAltTab*/ false);
 }
 
 bool Stop() {
     bool stopped = Installer::StopAgentAndHooks(ActiveDirectory() + SharedNames::kHookDll);
-    if (stopped) Print(L"Stopped. Alt+Tab is back to stock until the agent starts again.");
+    if (stopped) Print(L"<good>Stopped.</> Alt+Tab is back to stock until the agent starts again.");
     return stopped;
 }
 
+// On yes, clears the window, so what follows is all that's on screen.
 bool Confirm(const wchar_t* question, bool byDefault) {
-    Ask(L"%s %s ", question, byDefault ? L"[Y/n]" : L"[y/N]");
+    Ask(L"<b>%s</> <dim>%s</> ", question, byDefault ? L"[Y/n]" : L"[y/N]");
     wchar_t answer[16] = {};
     DWORD read = 0;
     ReadConsoleW(GetStdHandle(STD_INPUT_HANDLE), answer, 15, &read, nullptr);
     wchar_t first = read ? static_cast<wchar_t>(std::towlower(answer[0])) : L'\r';
-    return first == L'\r' || first == L'\n' ? byDefault : first == L'y';
+    bool yes = first == L'\r' || first == L'\n' ? byDefault : first == L'y';
+    if (yes) ClearScreen();
+    return yes;
 }
 
 // Double-clicked, or started from Settings > Apps: the console window is this
@@ -103,27 +126,38 @@ bool HasOwnConsole() {
 
 void WaitForEnter() {
     Print(L"");
-    Print(L"Press Enter to close.");
+    Print(L"<dim>Press Enter to close.</>");
+    FlushConsoleInputBuffer(GetStdHandle(STD_INPUT_HANDLE));  // an Enter pressed while it was busy
     wchar_t ignored[4];
     DWORD read;
     ReadConsoleW(GetStdHandle(STD_INPUT_HANDLE), ignored, 3, &read, nullptr);
 }
 
-bool Interactive() {
+enum class Outcome { Declined, Succeeded, Failed };
+
+Outcome Interactive() {
+    auto done = [](bool succeeded) { return succeeded ? Outcome::Succeeded : Outcome::Failed; };
     std::wstring here = ExecutableDirectory();
     if (!Installer::IsInstalled()) {
-        Print(L"Instant Alt+Tab keeps the Alt+Tab menu ready, so it opens instantly instead of being rebuilt");
-        Print(L"every time. It installs for this user only (no administrator rights) and starts with Windows.");
+        Print(L"<b>Instant Alt+Tab</> keeps the Alt+Tab menu ready, so it opens instantly instead of being rebuilt");
+        Print(L"every time. It installs for this user only and starts with Windows.");
         Print(L"");
-        return !Confirm(L"Install it now?", true) || Installer::Install();
+        return Confirm(L"Install it now?", true) ? done(Installer::Install(/*openAltTab*/ true)) : Outcome::Declined;
     }
-    PrintStatus();
+    PrintStatus(/*forPrompt*/ true);
     Print(L"");
     if (_wcsicmp(here.c_str(), Installer::InstallDirectory().c_str()) != 0) {
-        return !Confirm(L"Replace the installed copy with this one?", true) || Installer::Install();
+        std::wstring installed = Installer::InstalledVersion();
+        std::wstring question = installed == PROJECT_VERSION ? L"Reinstall version " PROJECT_VERSION
+                                : installed.empty() ? L"Replace the installed copy with version " PROJECT_VERSION
+                                                    : L"Replace version " + installed + L" with " PROJECT_VERSION;
+        question += Installer::DisabledByCrashGuard() ? L"? This also turns it back on." : L"?";
+        return Confirm(question.c_str(), true) ? done(Installer::Install(/*openAltTab*/ true)) : Outcome::Declined;
     }
-    if (Installer::DisabledByCrashGuard()) return !Confirm(L"Turn it back on?", true) || Installer::Install();
-    return !Confirm(L"Uninstall Instant Alt+Tab?", false) || Installer::Uninstall(here);
+    if (Installer::DisabledByCrashGuard()) {
+        return Confirm(L"Turn it back on?", true) ? done(Installer::Install(/*openAltTab*/ true)) : Outcome::Declined;
+    }
+    return Confirm(L"Uninstall Instant Alt+Tab?", false) ? done(Installer::Uninstall(here)) : Outcome::Declined;
 }
 
 }  // namespace
@@ -134,9 +168,11 @@ int wmain(int argc, wchar_t** argv) {
 
     bool succeeded;
     if (command.empty() && ownConsole) {
-        succeeded = Interactive();
+        Outcome outcome = Interactive();
+        if (outcome == Outcome::Declined) return 0;  // nothing happened, so nothing to read: close right away
+        succeeded = outcome == Outcome::Succeeded;
     } else if (command == L"install") {
-        succeeded = Installer::Install();
+        succeeded = Installer::Install(/*openAltTab*/ false);
     } else if (command == L"uninstall") {
         succeeded = Installer::Uninstall(ExecutableDirectory());
     } else if (command == L"status") {

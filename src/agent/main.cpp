@@ -179,6 +179,7 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
         }
         if (result->internals) {
             Log(L"Explorer %lu: found the Alt+Tab internals in %llu ms", explorer.Pid(), GetTickCount64() - started);
+            DeleteFileW((directory + SharedNames::kProblemFile).c_str());  // a failed download before this one
             if (!result->internals->dataModel.itemVtables[0]) {
                 Log(L"Explorer %lu: %s's item class wasn't found (%s), so the second Alt+Tab after Explorer starts may "
                     L"rebuild the menu once",
@@ -200,8 +201,7 @@ std::optional<AltTab::Internals> DiscoverWithRetries(ExplorerProcess& explorer, 
         } else if (++failedDownloads == kFailedDownloadsBeforeNotice) {
             Alert::ShowOnce(directory, L"offline " + BuildKey(explorer, switcher), kOfflineMessage);
         }
-        WriteTextFile(directory + SharedNames::kProblemFile,
-                      L"waiting to download Windows' public symbols: " + result->error);
+        WriteTextFile(directory + SharedNames::kProblemFile, SharedNames::kProblemRetryingDownload + result->error);
         Log(L"Explorer %lu: %s; trying again in %lu minutes", explorer.Pid(), result->error.c_str(), waitMs / 60000);
         wake = result->notPublished ? WaitCountingSleep(stop, explorer.Handle(), waitMs)
                                     : WaitFor(stop, explorer.Handle(), waitMs);
@@ -277,9 +277,20 @@ std::optional<DWORD> StartHooks(ExplorerProcess& explorer, const std::wstring& s
         if (wake != WakeReason::Timeout) return std::nullopt;
     }
     injected = true;
-    if (!LoadSwitcher(explorer, switcher, found->switcher.module)) return std::nullopt;
+    // Discovery records its own reason when it stops; from here on, this says why the hooks aren't on.
+    std::wstring problemFile = directory + SharedNames::kProblemFile;
+    if (!LoadSwitcher(explorer, switcher, found->switcher.module)) {
+        WriteTextFile(problemFile, std::wstring(L"loading ") + AltTab::kSwitcherDll +
+                                       L" into Explorer failed, or it loaded another file than the one analysed");
+        return std::nullopt;
+    }
     std::optional<DWORD> result = explorer.LoadAndStart(dll, *found);
     Log(L"Explorer %lu: %s", explorer.Pid(), Describe(result));
+    if (result == HookExports::kStarted) {
+        DeleteFileW(problemFile.c_str());
+    } else {
+        WriteTextFile(problemFile, Describe(result));
+    }
     return result;
 }
 
@@ -305,10 +316,10 @@ bool ServeExplorer(ExplorerProcess& explorer, HANDLE stop, const std::wstring& d
         hooked = injected = explorer.HasLoaded(dll);  // left running by an agent that was killed
         Log(L"Explorer %lu: %s", explorer.Pid(), hooked ? L"hooks already active" : L"another copy is already active");
     } else {
+        DeleteFileW((directory + SharedNames::kProblemFile).c_str());  // about an earlier Explorer
         std::optional<DWORD> result = StartHooks(explorer, switcher, dll, stop, directory, wake, injected);
         if (wake != WakeReason::Timeout) return wake == WakeReason::ExplorerExited;
         hooked = result == HookExports::kStarted;
-        if (hooked) DeleteFileW((directory + SharedNames::kProblemFile).c_str());
     }
 
     HANDLE turnedOff =
